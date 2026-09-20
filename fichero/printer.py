@@ -12,6 +12,8 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from bleak import BleakClient, BleakGATTCharacteristic, BleakScanner
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
 
 # --- RFCOMM (Classic Bluetooth) support - Linux + Windows (Python 3.9+) ---
 
@@ -26,6 +28,7 @@ RFCOMM_CHANNEL = 1
 # --- BLE identifiers ---
 
 PRINTER_NAME_PREFIXES = ("FICHERO", "D11s_")
+SCAN_TIMEOUT = 8  # seconds to wait for a printer advertisement
 
 # Using the 18f0 service (any of the four BLE UART services work)
 WRITE_UUID = "00002af1-0000-1000-8000-00805f9b34fb"
@@ -77,14 +80,24 @@ class PrinterNotReady(PrinterError):
 
 
 async def find_printer() -> str:
-    """Scan BLE for a Fichero/D11s printer. Returns the address."""
+    """Scan BLE for a Fichero/D11s printer. Returns the address.
+
+    Stops as soon as a printer advertises, rather than waiting out the full
+    scan window: BleakScanner.discover() always sleeps for its whole timeout,
+    which cost 8 seconds even when the printer answered in one.
+    """
     print("Scanning for printer...")
-    devices = await BleakScanner.discover(timeout=8)
-    for d in devices:
-        if d.name and any(d.name.startswith(p) for p in PRINTER_NAME_PREFIXES):
-            print(f"  Found {d.name} at {d.address}")
-            return d.address
-    raise PrinterNotFound("No Fichero/D11s printer found. Is it turned on?")
+
+    def is_printer(device: BLEDevice, adv: AdvertisementData) -> bool:
+        name = device.name or adv.local_name
+        return bool(name and name.startswith(PRINTER_NAME_PREFIXES))
+
+    device = await BleakScanner.find_device_by_filter(is_printer, timeout=SCAN_TIMEOUT)
+    if device is None:
+        raise PrinterNotFound("No Fichero/D11s printer found. Is it turned on?")
+
+    print(f"  Found {device.name} at {device.address}")
+    return device.address
 
 
 # --- Status ---
