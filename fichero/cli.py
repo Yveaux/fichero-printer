@@ -105,15 +105,67 @@ async def cmd_status(args: argparse.Namespace) -> None:
               f"overheated={status.overheated} charging={status.charging}")
 
 
+def _resolve_text(args: argparse.Namespace) -> str:
+    """Join positional words into one line; each --line adds another line.
+
+    A literal backslash-n in the positional text is also treated as a line
+    break, so shells that cannot produce a real newline can still make
+    multi-line labels.
+    """
+    lines = []
+    if args.text:
+        joined = " ".join(args.text).replace("\\n", "\n")
+        lines.extend(joined.split("\n"))
+    lines.extend(args.line or [])
+    if not lines:
+        raise SystemExit("  ERROR: give some text, either positionally or via --line")
+    return "\n".join(lines)
+
+
 async def cmd_text(args: argparse.Namespace) -> None:
-    text = " ".join(args.text)
+    text = _resolve_text(args)
     label_h = _resolve_label_height(args)
-    img = text_to_image(text, font_size=args.font_size, label_height=label_h)
+    img = text_to_image(text, font_size=args.font_size, label_height=label_h,
+                        font=args.font, align=args.align,
+                        line_spacing=args.line_spacing, rotate=args.rotate)
+
+    if args.preview:
+        img.save(args.preview)
+        print(f"Preview written to {args.preview} ({img.width}x{img.height}), not printing.")
+        return
+
     async with connect(args.address, classic=args.classic, channel=args.channel) as pc:
-        print(f'Printing "{text}"...')
+        shown = text.replace("\n", " / ")
+        print(f'Printing "{shown}"...')
         ok = await do_print(pc, img, args.density, paper=args.paper,
                             copies=args.copies, dither=False, max_rows=label_h)
         print("Done." if ok else "FAILED.")
+
+
+def cmd_fonts(args: argparse.Namespace) -> None:
+    """List font files Pillow can resolve by bare name."""
+    seen = set()
+    for directory in _font_dirs():
+        if not os.path.isdir(directory):
+            continue
+        for entry in sorted(os.listdir(directory)):
+            if entry.lower().endswith((".ttf", ".ttc", ".otf")) and entry not in seen:
+                seen.add(entry)
+                print(f"  {entry}")
+    if not seen:
+        print("  No font files found; pass a full path to --font instead.")
+
+
+def _font_dirs() -> list[str]:
+    windir = os.environ.get("WINDIR")
+    dirs = []
+    if windir:
+        dirs.append(os.path.join(windir, "fonts"))
+        dirs.append(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Fonts"))
+    dirs += ["/usr/share/fonts", "/usr/local/share/fonts",
+             os.path.expanduser("~/.fonts"), "/Library/Fonts",
+             os.path.expanduser("~/Library/Fonts")]
+    return dirs
 
 
 async def cmd_image(args: argparse.Namespace) -> None:
@@ -202,11 +254,28 @@ def main() -> None:
     p_status.set_defaults(func=cmd_status)
 
     p_text = sub.add_parser("text", help="Print text label")
-    p_text.add_argument("text", nargs="+", help="Text to print")
+    p_text.add_argument("text", nargs="*", help="Text to print")
     p_text.add_argument("--density", type=int, default=2, choices=[0, 1, 2],
                         help="Print density: 0=light, 1=medium, 2=thick")
     p_text.add_argument("--copies", type=int, default=1, help="Number of copies")
     p_text.add_argument("--font-size", type=int, default=30, help="Font size in points")
+    p_text.add_argument("--font", default=os.environ.get("FICHERO_FONT"),
+                        help="TrueType font: file path or installed name such as "
+                             "'arialbd' (or set FICHERO_FONT). Default: Pillow's "
+                             "built-in font")
+    p_text.add_argument("--line", action="append", metavar="TEXT",
+                        help="Add another line of text; repeat for more lines")
+    p_text.add_argument("--rotate", type=int, choices=[0, 90, 180, 270],
+                        default=int(os.environ.get("FICHERO_ROTATE", "0")),
+                        help="How the text sits on the label: 0 reads along the "
+                             "label length (default), 90 reads across it with the "
+                             "lines stacked down the length (or set FICHERO_ROTATE)")
+    p_text.add_argument("--align", choices=["left", "center", "right"], default="center",
+                        help="Horizontal alignment of multi-line text (default: center)")
+    p_text.add_argument("--line-spacing", type=int, default=4,
+                        help="Extra pixels between lines (default: 4)")
+    p_text.add_argument("--preview", metavar="PATH",
+                        help="Save the rendered label to an image file instead of printing")
     p_text.add_argument("--label-length", type=int, default=None,
                         help="Label length in mm (default: 30mm)")
     p_text.add_argument("--label-height", type=int, default=240,
@@ -228,6 +297,9 @@ def main() -> None:
     _add_paper_arg(p_image)
     p_image.set_defaults(func=cmd_image)
 
+    p_fonts = sub.add_parser("fonts", help="List installed fonts usable with --font")
+    p_fonts.set_defaults(func=cmd_fonts, sync=True)
+
     p_set = sub.add_parser("set", help="Change printer settings")
     p_set.add_argument("setting", choices=["density", "shutdown", "paper"],
                        help="Setting to change")
@@ -241,8 +313,11 @@ def main() -> None:
         args.paper = _parse_paper(args.paper)
 
     try:
-        asyncio.run(args.func(args))
-    except PrinterError as e:
+        if getattr(args, "sync", False):
+            args.func(args)
+        else:
+            asyncio.run(args.func(args))
+    except (PrinterError, ValueError) as e:
         print(f"  ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 

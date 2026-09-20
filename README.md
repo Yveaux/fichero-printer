@@ -93,7 +93,77 @@ uv run fichero image label.png --density 1 --copies 2
 
 Density: 0=light, 1=medium (default), 2=thick.
 
-Text labels accept `--font-size` (default 24) and `--label-height` in pixels (default 240).
+Text labels accept `--font-size` (default 30) and `--label-length` in mm (default 30mm,
+or `--label-height` in pixels).
+
+### Fonts
+
+By default text is rendered with Pillow's built-in font. `--font` takes a path to a
+TrueType file, or the name of an installed font (the extension may be left off):
+
+```
+uv run fichero text "Fragile" --font arialbd --font-size 34
+uv run fichero text "Serial 4711" --font consola
+uv run fichero text "Logo" --font /path/to/MyFont.ttf
+uv run fichero fonts          # list installed fonts you can name
+```
+
+`FICHERO_FONT` sets a default, so you don't have to pass `--font` every time.
+
+### Multiple lines
+
+Each `--line` adds a line:
+
+```
+uv run fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --font-size 22
+```
+
+A literal `\n` in the positional text works too, for shells that make real newlines
+awkward:
+
+```
+uv run fichero text "Line one\nLine two"
+```
+
+`--align left|center|right` (default center) and `--line-spacing` (default 4px) control
+the layout within the text block. The block itself is always centred on the label, in
+both directions.
+
+### Orientation
+
+`--rotate` sets how the text sits on the label when you hold it the long way round, the
+same way the web designer shows it:
+
+- `0` (default) reads along the 30mm length. Lines stack across the 96px printhead, so
+  about three fit at `--font-size 30`.
+- `90` reads across the label, a quarter turn anticlockwise. Each line is limited to the
+  96px printhead and the lines stack down the length, which is what you want for a stack
+  of short lines:
+
+```
+uv run fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --line "M3 x 8" \
+    --font bahnschrift --font-size 23 --rotate 90
+```
+
+- `180` and `270` are those two upside down. Use them if a label comes out of the printer
+  reading the wrong way for how you want to stick it on.
+
+The CLI warns when the text block does not fit the label area. `FICHERO_ROTATE` sets a
+default.
+
+Note: the CLI used to turn the canvas anticlockwise on its way to the printer, while the
+web client turns it clockwise (`ImageEncoder.rotateCW90`, `printDirection: "left"`), so
+the two disagreed by 180 degrees. The CLI now follows the web client, and `--rotate`
+angles mean the same thing in both.
+
+### Previewing without printing
+
+`--preview` renders the label to an image file and skips the printer entirely, which is
+the quick way to tune font, size and line breaks:
+
+```
+uv run fichero text --line "Kabel A12" --line "230V / 16A" --font consola --preview label.png
+```
 
 ### Device info
 
