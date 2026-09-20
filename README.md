@@ -57,38 +57,111 @@ Requires Web Bluetooth, so Chrome/Edge/Opera only. Firefox and Safari don't supp
 
 ## CLI Setup
 
-Requires Python 3.10+ and uv. Turn on the printer and run:
+Requires Python 3.10+. Create a virtualenv and install the package into it:
 
 ```
-uv run fichero info
+python -m venv .venv
+.venv/bin/pip install -e .
 ```
 
-This auto-discovers the printer via BLE scan. To skip scanning on subsequent runs, find your printer's address from the scan output and save it:
+On Windows that second line is `.venv\Scripts\pip install -e .`
+
+Activating the virtualenv puts a `fichero` command on your PATH:
 
 ```
-export FICHERO_ADDR=AA:BB:CC:DD:EE:FF
+source .venv/bin/activate              # Linux, macOS
+source .venv/Scripts/activate          # Windows, Git Bash
+.venv\Scripts\Activate.ps1             # Windows, PowerShell
 ```
 
-You can also pass it per-command:
+Every example below assumes it is active. Without activating, call the executable
+directly instead: `.venv/bin/fichero ...`, or `.venv/Scripts/fichero.exe ...` on
+Windows.
+
+## Setting up the printer
+
+Turn the printer on and run:
 
 ```
-uv run fichero --address AA:BB:CC:DD:EE:FF info
+fichero info
 ```
+
+It scans Bluetooth LE for a device whose name starts with `FICHERO` or `D11s_`,
+connects, and reports what it found:
+
+```
+Scanning for printer...
+  Found FICHERO_5836_BLE at 22:99:17:BE:B0:21
+  model: D11s
+  firmware: 2.4.9
+  battery: 100%
+  status: ready
+  shutdown: 20 min
+```
+
+Take the address from that output and put it in your environment. Later commands then
+look for that one device instead of scanning by name:
+
+```
+export FICHERO_ADDR=22:99:17:BE:B0:21           # Linux, macOS, Git Bash
+$env:FICHERO_ADDR = "22:99:17:BE:B0:21"         # Windows PowerShell
+```
+
+Put that line in your shell profile to make it stick. `--address` does the same for a
+single command. Note this is the BLE address, not the `mac_classic` one that `info`
+also prints.
+
+The printer does not need to be paired in your operating system's Bluetooth settings,
+and on Windows a pairing there can actually get in the way, because the OS holds the
+connection and the device stops advertising.
+
+### When the printer is not found
+
+After a session closes the printer goes quiet for a few seconds, and now and then it
+stays that way. If a command reports `No Fichero/D11s printer found` or
+`Device with address ... was not found` while the printer is plainly switched on,
+turn it off and on again and retry. The first connection after a power cycle takes
+about five seconds; afterwards it is closer to two.
+
+## A worked example: a strip of screw sizes
+
+Four short lines on one 14x30mm label, reading across the label the way the web
+designer lays them out:
+
+```
+fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --line "M3 x 8" \
+    --font bahnschrift --font-size 23 --rotate 90
+```
+
+Add `--preview label.png` to that command to write the label to a file and skip the
+printer entirely. Worth doing the first time, and whenever you change the font or the
+number of lines.
+
+Why these flags:
+
+- `--rotate 90` turns the text a quarter turn, so each line runs across the 12mm
+  height and the four lines stack down the 30mm length. Without it the lines would
+  run along the length instead, and only about three would fit.
+- `--font-size 23` keeps a line inside the 96px printhead: `M3 x 20` is 75px wide in
+  Bahnschrift at that size, and all four lines together are 85px of the 240px length.
+  The CLI warns if a block does not fit.
+- `--font bahnschrift` is a narrow face, which buys a couple of characters per line
+  over the default. Any installed font works; `fichero fonts` lists them.
 
 ## CLI Usage
 
 ```
-uv run fichero --help
+fichero --help
 ```
 
 ### Printing
 
 ```
-uv run fichero text "Hello World"
-uv run fichero text "Fragile" --density 2 --copies 3
-uv run fichero text "Big Label" --font-size 40 --label-height 180
-uv run fichero image label.png
-uv run fichero image label.png --density 1 --copies 2
+fichero text "Hello World"
+fichero text "Fragile" --density 2 --copies 3
+fichero text "Big Label" --font-size 40 --label-height 180
+fichero image label.png
+fichero image label.png --density 1 --copies 2
 ```
 
 Density: 0=light, 1=medium (default), 2=thick.
@@ -102,10 +175,10 @@ By default text is rendered with Pillow's built-in font. `--font` takes a path t
 TrueType file, or the name of an installed font (the extension may be left off):
 
 ```
-uv run fichero text "Fragile" --font arialbd --font-size 34
-uv run fichero text "Serial 4711" --font consola
-uv run fichero text "Logo" --font /path/to/MyFont.ttf
-uv run fichero fonts          # list installed fonts you can name
+fichero text "Fragile" --font arialbd --font-size 34
+fichero text "Serial 4711" --font consola
+fichero text "Logo" --font /path/to/MyFont.ttf
+fichero fonts          # list installed fonts you can name
 ```
 
 `FICHERO_FONT` sets a default, so you don't have to pass `--font` every time.
@@ -115,14 +188,14 @@ uv run fichero fonts          # list installed fonts you can name
 Each `--line` adds a line:
 
 ```
-uv run fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --font-size 22
+fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --font-size 22
 ```
 
 A literal `\n` in the positional text works too, for shells that make real newlines
 awkward:
 
 ```
-uv run fichero text "Line one\nLine two"
+fichero text "Line one\nLine two"
 ```
 
 `--align left|center|right` (default center) and `--line-spacing` (default 4px) control
@@ -141,7 +214,7 @@ same way the web designer shows it:
   of short lines:
 
 ```
-uv run fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --line "M3 x 8" \
+fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --line "M3 x 8" \
     --font bahnschrift --font-size 23 --rotate 90
 ```
 
@@ -162,22 +235,26 @@ angles mean the same thing in both.
 the quick way to tune font, size and line breaks:
 
 ```
-uv run fichero text --line "Kabel A12" --line "230V / 16A" --font consola --preview label.png
+fichero text --line "Kabel A12" --line "230V / 16A" --font consola --preview label.png
 ```
+
+The preview is written in the printer's own orientation: 96px wide, and as many rows
+tall as the label is long. Turn it a quarter turn anticlockwise to see it the way you
+will hold the label.
 
 ### Device info
 
 ```
-uv run fichero info
-uv run fichero status
+fichero info
+fichero status
 ```
 
 ### Settings
 
 ```
-uv run fichero set density 2
-uv run fichero set shutdown 30
-uv run fichero set paper gap
+fichero set density 2
+fichero set shutdown 30
+fichero set paper gap
 ```
 
 - `density` - how dark the print is. 0 is faint, 1 is normal, 2 is the darkest. Higher density uses more battery and can smudge on some label stock.
