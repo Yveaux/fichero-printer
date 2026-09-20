@@ -15,7 +15,12 @@ from bleak import BleakClient, BleakGATTCharacteristic, BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
-from fichero.profiles import DEFAULT_PROFILE, PrinterProfile, profile_for_model
+from fichero.profiles import (
+    DEFAULT_PROFILE,
+    PrinterProfile,
+    all_name_prefixes,
+    profile_for_model,
+)
 
 # --- RFCOMM (Classic Bluetooth) support - Linux + Windows (Python 3.9+) ---
 
@@ -29,8 +34,11 @@ RFCOMM_CHANNEL = 1
 
 # --- BLE identifiers ---
 
-PRINTER_NAME_PREFIXES = ("FICHERO", "D11s_")
-SCAN_TIMEOUT = 8  # seconds to wait for a printer advertisement
+PRINTER_NAME_PREFIXES = all_name_prefixes()  # every profile's advertised names
+# Seconds to wait for a printer advertisement. Generous on purpose: the scan
+# returns the moment a printer answers, so a long window only costs anything
+# when there is nothing to find. A freshly powered-on D11s took 7.7s once.
+SCAN_TIMEOUT = 20
 
 # Using the 18f0 service (any of the four BLE UART services work)
 WRITE_UUID = "00002af1-0000-1000-8000-00805f9b34fb"
@@ -85,22 +93,32 @@ class PrinterNotReady(PrinterError):
 # --- Discovery ---
 
 
-async def find_printer() -> str:
-    """Scan BLE for a Fichero/D11s printer. Returns the address.
+async def find_printer(profile: PrinterProfile | None = None) -> str:
+    """Scan BLE for a supported printer. Returns the address.
+
+    Looks for the Bluetooth names every profile advertises under, or only
+    *profile*'s own when one is given - which is how you pick between two
+    printers that are both switched on.
 
     Stops as soon as a printer advertises, rather than waiting out the full
     scan window: BleakScanner.discover() always sleeps for its whole timeout,
     which cost 8 seconds even when the printer answered in one.
     """
-    print("Scanning for printer...")
+    names = profile.ble_name_prefixes if profile else all_name_prefixes()
+    prefixes = tuple(n.upper() for n in names)  # matched against name.upper()
+    wanted = f"{profile.name} " if profile else ""
+    print(f"Scanning for {wanted}printer...")
 
     def is_printer(device: BLEDevice, adv: AdvertisementData) -> bool:
         name = device.name or adv.local_name
-        return bool(name and name.startswith(PRINTER_NAME_PREFIXES))
+        return bool(name and name.upper().startswith(prefixes))
 
     device = await BleakScanner.find_device_by_filter(is_printer, timeout=SCAN_TIMEOUT)
     if device is None:
-        raise PrinterNotFound("No Fichero/D11s printer found. Is it turned on?")
+        raise PrinterNotFound(
+            f"No {wanted or 'supported '}printer found (looked for "
+            f"{', '.join(names)}). Is it turned on?"
+        )
 
     print(f"  Found {device.name} at {device.address}")
     return device.address
@@ -450,7 +468,7 @@ async def connect(
                 await pc.detect_profile()
             yield pc
     else:
-        addr = address or await find_printer()
+        addr = address or await find_printer(profile)
         async with BleakClient(addr) as client:
             pc = PrinterClient(client, profile)
             await pc.start()

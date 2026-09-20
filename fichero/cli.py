@@ -118,7 +118,8 @@ async def do_print(
 
 
 async def cmd_info(args: argparse.Namespace) -> None:
-    async with connect(args.address, classic=args.classic, channel=args.channel) as pc:
+    async with connect(args.address, classic=args.classic, channel=args.channel,
+                       profile=_forced_profile(args)) as pc:
         info = await pc.get_info()
         for k, v in info.items():
             print(f"  {k}: {v}")
@@ -130,7 +131,8 @@ async def cmd_info(args: argparse.Namespace) -> None:
 
 
 async def cmd_status(args: argparse.Namespace) -> None:
-    async with connect(args.address, classic=args.classic, channel=args.channel) as pc:
+    async with connect(args.address, classic=args.classic, channel=args.channel,
+                       profile=_forced_profile(args)) as pc:
         status = await pc.get_status()
         print(f"  Status: {status}")
         print(f"  Raw: 0x{status.raw:02X} ({status.raw:08b})")
@@ -255,7 +257,8 @@ def cmd_profiles(args: argparse.Namespace) -> None:
 
 
 async def cmd_set(args: argparse.Namespace) -> None:
-    async with connect(args.address, classic=args.classic, channel=args.channel) as pc:
+    async with connect(args.address, classic=args.classic, channel=args.channel,
+                       profile=_forced_profile(args)) as pc:
         if args.setting == "density":
             val = int(args.value)
             if not 0 <= val <= 2:

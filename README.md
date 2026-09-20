@@ -106,8 +106,11 @@ Turn the printer on and run:
 fichero info
 ```
 
-It scans Bluetooth LE for a device whose name starts with `FICHERO` or `D11s_`,
-connects, and reports what it found:
+It scans Bluetooth LE for the names the known profiles advertise under - `FICHERO`,
+`D11s_`, `CRAFTS&CO`, `D1-4777` - connects to the first one that answers, and reports
+what it found.
+
+A Fichero D11s:
 
 ```
 Scanning for printer...
@@ -118,6 +121,21 @@ Scanning for printer...
   status: ready
   shutdown: 20 min
 ```
+
+A Crafts&Co 4777:
+
+```
+Scanning for printer...
+  Found CRAFTS&CO|4777_BLE at 5E:55:09:10:A9:5C
+  model: D1-4777
+  firmware: V1.08
+  battery: 94%
+  status: ready
+  shutdown: -1 min
+```
+
+`shutdown: -1` on the 4777 is not an error; that model does not implement the
+auto-off setting.
 
 Take the address from that output and put it in your environment. Later commands then
 look for that one device instead of scanning by name:
@@ -131,6 +149,19 @@ Put that line in your shell profile to make it stick. `--address` does the same 
 single command. Note this is the BLE address, not the `mac_classic` one that `info`
 also prints.
 
+### Two printers at once
+
+With more than one printer switched on, a plain scan takes whichever advertises first.
+`--printer` narrows the scan to one profile's names, so you get the one you meant
+without looking up addresses:
+
+```
+fichero --printer d1-4777 info
+fichero --printer d11s text "Hello"
+```
+
+An address still wins over both, and is worth setting when you mostly use one printer.
+
 The printer does not need to be paired in your operating system's Bluetooth settings,
 and on Windows a pairing there can actually get in the way, because the OS holds the
 connection and the device stops advertising.
@@ -138,10 +169,12 @@ connection and the device stops advertising.
 ### When the printer is not found
 
 After a session closes the printer goes quiet for a few seconds, and now and then it
-stays that way. If a command reports `No Fichero/D11s printer found` or
+stays that way. If a command reports `No supported printer found` or
 `Device with address ... was not found` while the printer is plainly switched on,
-turn it off and on again and retry. The first connection after a power cycle takes
-about five seconds; afterwards it is closer to two.
+turn it off and on again and retry. Give it a moment: a freshly powered-on printer
+can take the better part of ten seconds to start advertising, and the first connection
+after that runs to about five seconds. Once it is awake, finding it takes well under
+a second.
 
 ## Worked examples
 

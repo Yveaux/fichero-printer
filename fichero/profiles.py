@@ -38,6 +38,11 @@ class PrinterProfile:
     """Model strings this profile claims, matched case-insensitively against
     the reply to `10 FF 20 F0`. A trailing `*` matches as a prefix."""
 
+    ble_name_prefixes: tuple[str, ...] = ()
+    """Bluetooth names this model advertises under, as prefixes. A scan looks
+    for every profile's prefixes, so a new model is only discoverable once its
+    own are listed here."""
+
     description: str = ""
 
     printhead_px: int = 96
@@ -91,6 +96,7 @@ class PrinterProfile:
 D11S = PrinterProfile(
     name="d11s",
     models=("D11s", "D12*"),
+    ble_name_prefixes=("FICHERO", "D11s_"),
     description="Fichero / AiYin D11s, 14x30mm labels",
     printhead_px=96,
     enable_cmd=AIYIN_ENABLE,
@@ -105,6 +111,7 @@ D11S = PrinterProfile(
 D1_4777 = PrinterProfile(
     name="d1-4777",
     models=("D1-4777",),
+    ble_name_prefixes=("CRAFTS&CO", "D1-4777"),
     description="Crafts&Co 4777, 50x15mm labels",
     printhead_px=384,
     enable_cmd=LUJIANG_ENABLE,
@@ -146,3 +153,13 @@ def profile_by_name(name: str) -> PrinterProfile:
 
 def profile_names() -> list[str]:
     return [p.name for p in PROFILES]
+
+
+def all_name_prefixes() -> tuple[str, ...]:
+    """Every Bluetooth name prefix any profile advertises under."""
+    seen: list[str] = []
+    for profile in PROFILES:
+        for prefix in profile.ble_name_prefixes:
+            if prefix not in seen:
+                seen.append(prefix)
+    return tuple(seen)
