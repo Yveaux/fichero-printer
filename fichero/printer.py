@@ -15,6 +15,8 @@ from bleak import BleakClient, BleakGATTCharacteristic, BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
+from fichero.profiles import DEFAULT_PROFILE, PrinterProfile, profile_for_model
+
 # --- RFCOMM (Classic Bluetooth) support - Linux + Windows (Python 3.9+) ---
 
 _RFCOMM_AVAILABLE = False
@@ -35,9 +37,13 @@ WRITE_UUID = "00002af1-0000-1000-8000-00805f9b34fb"
 NOTIFY_UUID = "00002af0-0000-1000-8000-00805f9b34fb"
 
 # --- Printhead ---
+#
+# These are the D11s values, kept for callers that predate printer profiles.
+# Anything that talks to a connected printer should use its profile instead,
+# because the D1-4777 is four times as wide.
 
-PRINTHEAD_PX = 96
-BYTES_PER_ROW = PRINTHEAD_PX // 8  # 12
+PRINTHEAD_PX = DEFAULT_PROFILE.printhead_px
+BYTES_PER_ROW = DEFAULT_PROFILE.bytes_per_row
 CHUNK_SIZE_BLE = 200        # BLE MTU-limited
 CHUNK_SIZE_CLASSIC = 16384  # from decompiled app (C1703d.java), stream-based
 
@@ -215,12 +221,16 @@ class RFCOMMClient:
 
 
 class PrinterClient:
-    def __init__(self, client: BleakClient):
+    def __init__(self, client: BleakClient, profile: PrinterProfile | None = None):
         self.client = client
         self._buf = bytearray()
         self._event = asyncio.Event()
         self._lock = asyncio.Lock()
         self._is_classic = getattr(client, "is_classic", False)
+        self.profile = profile or DEFAULT_PROFILE
+        self.profile_detected = False
+        """True once detect_profile() recognised the model. False means the
+        profile is a fallback or was forced by the caller."""
 
     def _on_notify(self, _char: BleakGATTCharacteristic, data: bytearray) -> None:
         self._buf.extend(data)
@@ -228,6 +238,24 @@ class PrinterClient:
 
     async def start(self) -> None:
         await self.client.start_notify(NOTIFY_UUID, self._on_notify)
+
+    async def detect_profile(self) -> PrinterProfile:
+        """Ask the printer what it is and adopt the matching profile.
+
+        Leaves the current profile in place when the model is unrecognised, so
+        an unknown printer still works with the defaults (or whatever the caller
+        forced) rather than refusing to print.
+        """
+        try:
+            model = await self.get_model()
+        except PrinterTimeout:
+            return self.profile
+
+        found = profile_for_model(model)
+        if found is not None:
+            self.profile = found
+            self.profile_detected = True
+        return self.profile
 
     async def send(self, data: bytes, wait: bool = False, timeout: float = 2.0) -> bytes:
         async with self._lock:
@@ -300,7 +328,10 @@ class PrinterClient:
         r = await self.send(bytes([0x10, 0xFF, 0x70]), wait=True)
         if not r:
             return {}
-        parts = r.decode(errors="replace").split("|")
+        # Split from the right: the Bluetooth name is the first field and may
+        # itself contain a pipe (the Crafts&Co D1-4777 is named "CRAFTS&CO|4777"),
+        # which shifts every later field when splitting from the left.
+        parts = r.decode(errors="replace").rsplit("|", 5)
         if len(parts) >= 6:
             return {
                 "bt_name": parts[0],
@@ -320,8 +351,17 @@ class PrinterClient:
         return r == b"OK"
 
     async def set_paper_type(self, paper: int = PAPER_GAP) -> bool:
-        """0=gap/label, 1=black mark, 2=continuous."""
-        r = await self.send(bytes([0x10, 0xFF, 0x84, paper]), wait=True)
+        """0=gap/label, 1=black mark, 2=continuous.
+
+        Models that do not implement this leave the command unanswered, so
+        their profile skips it rather than stalling for the timeout.
+        """
+        if not self.profile.supports_paper_type:
+            return False
+        try:
+            r = await self.send(bytes([0x10, 0xFF, 0x84, paper]), wait=True)
+        except PrinterTimeout:
+            return False
         return r == b"OK"
 
     async def set_shutdown_time(self, minutes: int) -> bool:
@@ -340,8 +380,12 @@ class PrinterClient:
         await self.send(b"\x00" * 12)
 
     async def enable(self) -> None:
-        """AiYin enable: 10 FF FE 01 (NOT 10 FF F1 03)."""
-        await self.send(bytes([0x10, 0xFF, 0xFE, 0x01]))
+        """Enable printing, with the command this model's device class wants.
+
+        AiYin (D11s) and Base/Lujiang (D1-4777) use different bytes here, and
+        the wrong one makes the printer feed the label without heating.
+        """
+        await self.send(self.profile.enable_cmd)
 
     async def feed_dots(self, dots: int) -> None:
         """Feed paper forward by n dots."""
@@ -351,9 +395,22 @@ class PrinterClient:
         """Position to next label."""
         await self.send(bytes([0x1D, 0x0C]))
 
+    async def finish_label(self) -> None:
+        """Advance the printed label to the tear edge.
+
+        `1D 0C` runs to the next gap, which is right for a printer whose raster
+        stops short of the end of the label. When the raster fills the label,
+        as on the D1-4777, that command hands you a blank label as well, so
+        those profiles advance a fixed number of dots instead.
+        """
+        if self.profile.feed_dots is None:
+            await self.form_feed()
+        else:
+            await self.feed_dots(self.profile.feed_dots)
+
     async def stop_print(self) -> bool:
-        """AiYin stop: 10 FF FE 45. Waits for 0xAA or 'OK'."""
-        r = await self.send(bytes([0x10, 0xFF, 0xFE, 0x45]), wait=True, timeout=60.0)
+        """End the print job. Waits for 0xAA or 'OK'."""
+        r = await self.send(self.profile.stop_cmd, wait=True, timeout=60.0)
         if r:
             return r[0] == 0xAA or r.startswith(b"OK")
         return False
@@ -376,18 +433,27 @@ async def connect(
     address: str | None = None,
     classic: bool = False,
     channel: int = RFCOMM_CHANNEL,
+    profile: PrinterProfile | None = None,
 ) -> AsyncGenerator[PrinterClient, None]:
-    """Discover printer, connect, and yield a ready PrinterClient."""
+    """Discover printer, connect, and yield a ready PrinterClient.
+
+    The model is read back and the matching profile adopted, unless *profile*
+    forces one - which is how you drive a printer this package does not know.
+    """
     if classic:
         if not address:
             raise PrinterError("--address is required for Classic Bluetooth (no scanning)")
         async with RFCOMMClient(address, channel) as client:
-            pc = PrinterClient(client)
+            pc = PrinterClient(client, profile)
             await pc.start()
+            if profile is None:
+                await pc.detect_profile()
             yield pc
     else:
         addr = address or await find_printer()
         async with BleakClient(addr) as client:
-            pc = PrinterClient(client)
+            pc = PrinterClient(client, profile)
             await pc.start()
+            if profile is None:
+                await pc.detect_profile()
             yield pc

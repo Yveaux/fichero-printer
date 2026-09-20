@@ -5,7 +5,7 @@ import logging
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from fichero.printer import PRINTHEAD_PX
+from fichero.profiles import DEFAULT_PROFILE
 
 log = logging.getLogger(__name__)
 
@@ -40,21 +40,24 @@ def floyd_steinberg_dither(img: Image.Image) -> Image.Image:
 
 
 def prepare_image(
-    img: Image.Image, max_rows: int = 240, dither: bool = True
+    img: Image.Image,
+    max_rows: int = 240,
+    dither: bool = True,
+    printhead_px: int = DEFAULT_PROFILE.printhead_px,
 ) -> Image.Image:
-    """Convert any image to 96px wide, 1-bit, black on white.
+    """Scale any image to the printhead width, 1-bit, black on white.
 
     When *dither* is True (default), uses Floyd-Steinberg error diffusion
     for better quality on photos and gradients.  Set False for crisp text.
     """
     img = img.convert("L")
     w, h = img.size
-    new_h = int(h * (PRINTHEAD_PX / w))
-    img = img.resize((PRINTHEAD_PX, new_h), Image.LANCZOS)
+    new_h = int(h * (printhead_px / w))
+    img = img.resize((printhead_px, new_h), Image.LANCZOS)
 
     if new_h > max_rows:
         log.warning("Image height %dpx exceeds max %dpx, cropping bottom", new_h, max_rows)
-        img = img.crop((0, 0, PRINTHEAD_PX, max_rows))
+        img = img.crop((0, 0, printhead_px, max_rows))
 
     img = ImageOps.autocontrast(img, cutoff=1)
 
@@ -68,12 +71,14 @@ def prepare_image(
     return img
 
 
-def image_to_raster(img: Image.Image) -> bytes:
+def image_to_raster(
+    img: Image.Image, printhead_px: int = DEFAULT_PROFILE.printhead_px
+) -> bytes:
     """Pack 1-bit image into raw raster bytes, MSB first."""
     if img.mode != "1":
         raise ValueError(f"Expected mode '1', got '{img.mode}'")
-    if img.width != PRINTHEAD_PX:
-        raise ValueError(f"Expected width {PRINTHEAD_PX}, got {img.width}")
+    if img.width != printhead_px:
+        raise ValueError(f"Expected width {printhead_px}, got {img.width}")
     return img.tobytes()
 
 
@@ -107,6 +112,7 @@ def text_to_image(
     align: str = "center",
     line_spacing: int = 4,
     rotate: int = 0,
+    printhead_px: int = DEFAULT_PROFILE.printhead_px,
 ) -> Image.Image:
     """Render crisp 1-bit text, centred on the label.
 
@@ -115,15 +121,19 @@ def text_to_image(
     *rotate* is how the text sits on the label when you hold it the long way
     round, like the web designer shows it:
 
-    - 0 reads along the label length; lines stack across the 96px printhead,
-      so tall multi-line blocks need a smaller *font_size*.
+    - 0 reads along the feed direction; lines stack across the printhead, so
+      tall multi-line blocks need a smaller *font_size*.
     - 90 reads across the label, a quarter turn anticlockwise; each line is
-      limited to the 96px printhead and lines stack down the label length,
+      limited to the printhead width and the lines stack down the label,
       which is what you want for a stack of short lines.
     - 180 and 270 are those two upside down.
 
-    The printer always receives a 96px-wide image, so the canvas is laid out
-    in whichever direction survives the rotation.
+    Which of the two reads naturally depends on the printer: a D11s prints
+    across the short side of its label, a D1-4777 across the long side, so
+    each profile carries the *rotate* its labels want.
+
+    The printer always receives a *printhead_px*-wide image, so the canvas is
+    laid out in whichever direction survives the rotation.
     """
     if rotate not in (0, 90, 180, 270):
         raise ValueError(f"rotate must be 0, 90, 180 or 270, got {rotate}")
@@ -134,9 +144,9 @@ def text_to_image(
     # edge that prints first is the left one - same as the designer shows it.
     img_rotation = (rotate + 270) % 360
     if img_rotation in (90, 270):
-        canvas_w, canvas_h = label_height, PRINTHEAD_PX
+        canvas_w, canvas_h = label_height, printhead_px
     else:
-        canvas_w, canvas_h = PRINTHEAD_PX, label_height
+        canvas_w, canvas_h = printhead_px, label_height
 
     img = Image.new("L", (canvas_w, canvas_h), 255)
     draw = ImageDraw.Draw(img)

@@ -11,8 +11,18 @@ from fichero.printer import (
     RFCOMMClient,
     connect,
 )
+from fichero.profiles import (
+    PROFILES,
+    PrinterProfile,
+    profile_by_name,
+    profile_for_model,
+)
 
 __all__ = [
+    "PROFILES",
+    "PrinterProfile",
+    "profile_by_name",
+    "profile_for_model",
     "RFCOMM_CHANNEL",
     "PrinterClient",
     "PrinterError",

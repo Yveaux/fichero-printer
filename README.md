@@ -6,6 +6,26 @@ Blog post: [Reverse Engineering Action's Cheap Fichero Labelprinter](https://blo
 
 The [Fichero](https://www.action.com/nl-nl/p/3212141/fichero-labelprinter/) is a cheap Bluetooth thermal label printer sold at Action. Internally it's an AiYin D11s made by Xiamen Print Future Technology. The official app is closed-source and doesn't expose the protocol, so this project reverse-engineers it from the decompiled APK.
 
+## Supported printers
+
+The protocol is shared across a family of white-label thermal printers, but the
+details differ per model. Each supported model has a profile, and the CLI picks
+the right one from the model string the printer reports, so normally you do not
+have to say which printer you have.
+
+| Profile | Printer | Printhead | Labels | Notes |
+|---|---|---|---|---|
+| `d11s` | Fichero (Action), AiYin D11s | 96px / 12mm | 14x30mm | Head spans the short side |
+| `d1-4777` | Crafts&Co 4777 | 384px / 48mm | 50x15mm | Head spans the long side |
+
+```
+fichero profiles          # what each profile does
+```
+
+`--printer NAME` forces one, which is how you drive a model that is not in the
+list yet, and how `--preview` knows what to render for. See
+[Adding a printer](#adding-a-printer) to teach the package a new model.
+
 ## The printer
 
 - 96px wide printhead, 203 DPI
@@ -123,30 +143,49 @@ stays that way. If a command reports `No Fichero/D11s printer found` or
 turn it off and on again and retry. The first connection after a power cycle takes
 about five seconds; afterwards it is closer to two.
 
-## A worked example: a strip of screw sizes
+## Worked examples
 
-Four short lines on one 14x30mm label, reading across the label the way the web
-designer lays them out:
+Both examples print a strip of screw sizes. They differ because the two printers
+hold their labels the other way round, which is exactly what the profiles absorb.
+
+### Fichero D11s, 14x30mm
+
+Four short lines, reading across the label the way the web designer lays them out:
 
 ```
 fichero text --line "M3 x 20" --line "M3 x 18" --line "M3 x 12" --line "M3 x 8" \
     --font bahnschrift --font-size 23 --rotate 90
 ```
 
-Add `--preview label.png` to that command to write the label to a file and skip the
-printer entirely. Worth doing the first time, and whenever you change the font or the
-number of lines.
+This head spans the 12mm side, so text normally runs along the 30mm length and
+`--rotate 90` is what turns it a quarter turn. `--font-size 23` keeps a line inside
+the 96px head: `M3 x 20` is 75px wide in Bahnschrift, and the four lines together
+are 85px of the 240px length.
 
-Why these flags:
+### Crafts&Co 4777, 50x15mm
 
-- `--rotate 90` turns the text a quarter turn, so each line runs across the 12mm
-  height and the four lines stack down the 30mm length. Without it the lines would
-  run along the length instead, and only about three would fit.
-- `--font-size 23` keeps a line inside the 96px printhead: `M3 x 20` is 75px wide in
-  Bahnschrift at that size, and all four lines together are 85px of the 240px length.
-  The CLI warns if a block does not fit.
-- `--font bahnschrift` is a narrow face, which buys a couple of characters per line
-  over the default. Any installed font works; `fichero fonts` lists them.
+```
+fichero text --line "M3 x 20" --line "M3 x 18" --font bahnschrift --font-size 30
+```
+
+No `--rotate` here. This head spans the 48mm side, so ordinary horizontal lines
+already read the right way and the profile makes that the default. There is room
+for roughly 48mm of text per line, and about three lines at this size within the
+15mm feed.
+
+### Either printer
+
+Add `--preview label.png` to skip the printer and write the rendered label to a
+file. Worth doing the first time and whenever you change the font or the number of
+lines. Offline there is no printer to ask, so pair it with `--printer`:
+
+```
+fichero --printer d1-4777 text --line "M3 x 20" --line "M3 x 18" --preview label.png
+```
+
+`--font bahnschrift` is a narrow face, which buys a couple of characters per line
+over the default. Any installed font works; `fichero fonts` lists them. The CLI
+warns when a text block does not fit the label.
 
 ## CLI Usage
 
@@ -205,12 +244,12 @@ both directions.
 ### Orientation
 
 `--rotate` sets how the text sits on the label when you hold it the long way round, the
-same way the web designer shows it:
+same way the web designer shows it. Each profile has its own default, whichever reads
+naturally on that printer's labels: `0` on the D11s, `90` on the D1-4777.
 
-- `0` (default) reads along the 30mm length. Lines stack across the 96px printhead, so
-  about three fit at `--font-size 30`.
+- `0` reads along the feed direction. Lines stack across the printhead.
 - `90` reads across the label, a quarter turn anticlockwise. Each line is limited to the
-  96px printhead and the lines stack down the length, which is what you want for a stack
+  printhead width and the lines stack down the label, which is what you want for a stack
   of short lines:
 
 ```
@@ -261,6 +300,28 @@ fichero set paper gap
 - `shutdown` - how many minutes the printer waits before turning itself off when idle (1-480). Set it higher if you're tired of turning it back on between prints.
 - `paper` - what kind of label stock you're using. `gap` is the default, for labels with spacing between them (the printer detects the gap to know where to stop). `black` is for rolls with a black mark between labels. `continuous` is for receipt-style rolls with no markings.
 
+## Adding a printer
+
+A profile is a dataclass in [fichero/profiles.py](fichero/profiles.py); adding a
+model means adding an entry to `PROFILES`. The fields that matter:
+
+| Field | How to find it |
+|---|---|
+| `models` | What `fichero info` prints as `model`. A trailing `*` matches as a prefix |
+| `printhead_px` | Print a full-width ruler and read where it stops. Too wide and the printer rejects the whole raster |
+| `enable_cmd` / `stop_cmd` | `AIYIN_*` or `LUJIANG_*`. Wrong pair = the label feeds blank |
+| `supports_paper_type` | False when `10 FF 84` goes unanswered |
+| `feed_dots` | `None` uses the `1D 0C` form feed. A number feeds that many dots, for labels whose raster fills the whole label |
+| `default_label_mm` | The label length along the feed direction |
+| `default_rotate` | `0` when the head spans the short side of the label, `90` when it spans the long side |
+
+Until a profile exists, drive the printer with `--printer` on whichever existing
+profile is closest and override the rest from the command line.
+
+The blank-label case is worth knowing in advance: with the wrong device class the
+printer accepts the raster, feeds the paper and never heats the head. It looks like
+a hardware fault and is not one.
+
 ## Library Usage
 
 ```python
@@ -275,7 +336,17 @@ async def main():
 asyncio.run(main())
 ```
 
-The package exports `PrinterClient`, `connect`, `PrinterError`, `PrinterNotFound`, `PrinterTimeout`, `PrinterNotReady`, and `PrinterStatus`.
+The package exports `PrinterClient`, `connect`, `PrinterError`, `PrinterNotFound`, `PrinterTimeout`, `PrinterNotReady`, `PrinterStatus`, `PrinterProfile` and `profile_by_name`.
+
+`connect()` detects the profile and leaves it on the client, so `pc.profile` tells
+you the printhead width to render for. Pass `profile=` to force one:
+
+```python
+from fichero import connect, profile_by_name
+
+async with connect(profile=profile_by_name("d1-4777")) as pc:
+    print(pc.profile.printhead_px, pc.profile_detected)
+```
 
 ## TODO
 

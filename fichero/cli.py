@@ -9,7 +9,6 @@ from PIL import Image
 
 from fichero.imaging import image_to_raster, prepare_image, text_to_image
 from fichero.printer import (
-    BYTES_PER_ROW,
     DELAY_AFTER_DENSITY,
     DELAY_AFTER_FEED,
     DELAY_COMMAND_GAP,
@@ -20,15 +19,45 @@ from fichero.printer import (
     PrinterNotReady,
     connect,
 )
+from fichero.profiles import (
+    DEFAULT_PROFILE,
+    DOTS_PER_MM,
+    PROFILES,
+    PrinterProfile,
+    profile_by_name,
+    profile_names,
+)
 
-DOTS_PER_MM = 8  # 203 DPI
+
+def _forced_profile(args: argparse.Namespace) -> PrinterProfile | None:
+    """The profile named by --printer, or None to detect it from the printer."""
+    name = getattr(args, "printer", None)
+    return profile_by_name(name) if name else None
 
 
-def _resolve_label_height(args: argparse.Namespace) -> int:
-    """Return label height in pixels from --label-length (mm) or --label-height (px)."""
+def _offline_profile(args: argparse.Namespace) -> PrinterProfile:
+    """Profile to render against when not connecting, as for --preview."""
+    return _forced_profile(args) or DEFAULT_PROFILE
+
+
+def _resolve_label_height(args: argparse.Namespace, profile: PrinterProfile) -> int:
+    """Label length in pixels, from --label-length (mm), --label-height (px),
+    or the profile's own default."""
     if args.label_length is not None:
         return args.label_length * DOTS_PER_MM
-    return args.label_height
+    if args.label_height is not None:
+        return args.label_height
+    return profile.default_label_px
+
+
+def _resolve_rotate(args: argparse.Namespace, profile: PrinterProfile) -> int:
+    """Rotation from --rotate, FICHERO_ROTATE, or the profile's own default."""
+    if args.rotate is not None:
+        return args.rotate
+    env = os.environ.get("FICHERO_ROTATE")
+    if env:
+        return int(env)
+    return profile.default_rotate
 
 
 async def do_print(
@@ -40,9 +69,11 @@ async def do_print(
     dither: bool = True,
     max_rows: int = 240,
 ) -> bool:
-    img = prepare_image(img, max_rows=max_rows, dither=dither)
+    profile = pc.profile
+    img = prepare_image(img, max_rows=max_rows, dither=dither,
+                        printhead_px=profile.printhead_px)
     rows = img.height
-    raster = image_to_raster(img)
+    raster = image_to_raster(img, printhead_px=profile.printhead_px)
 
     print(f"  Image: {img.width}x{rows}, {len(raster)} bytes, {copies} copies")
 
@@ -58,7 +89,8 @@ async def do_print(
         if not status.ok:
             raise PrinterNotReady(f"Printer not ready: {status}")
 
-        # AiYin print sequence (from decompiled APK)
+        # Print sequence from the decompiled APK. The enable/stop commands and
+        # the final feed come from the profile, because they differ per model.
         await pc.set_paper_type(paper)
         await asyncio.sleep(DELAY_COMMAND_GAP)
         await pc.wakeup()
@@ -67,13 +99,15 @@ async def do_print(
         await asyncio.sleep(DELAY_COMMAND_GAP)
 
         # Raster image: GS v 0 m xL xH yL yH <data>
+        cols = profile.bytes_per_row
         yl = rows & 0xFF
         yh = (rows >> 8) & 0xFF
-        header = bytes([0x1D, 0x76, 0x30, 0x00, BYTES_PER_ROW, 0x00, yl, yh])
+        header = bytes([0x1D, 0x76, 0x30, 0x00,
+                        cols & 0xFF, (cols >> 8) & 0xFF, yl, yh])
         await pc.send_chunked(header + raster)
 
         await asyncio.sleep(DELAY_RASTER_SETTLE)
-        await pc.form_feed()
+        await pc.finish_label()
         await asyncio.sleep(DELAY_AFTER_FEED)
 
         ok = await pc.stop_print()
@@ -122,24 +156,48 @@ def _resolve_text(args: argparse.Namespace) -> str:
     return "\n".join(lines)
 
 
-async def cmd_text(args: argparse.Namespace) -> None:
-    text = _resolve_text(args)
-    label_h = _resolve_label_height(args)
+def _render_text(args: argparse.Namespace, text: str, profile: PrinterProfile):
+    """Render *text* for *profile*, returning the image and its row count."""
+    label_h = _resolve_label_height(args, profile)
     img = text_to_image(text, font_size=args.font_size, label_height=label_h,
                         font=args.font, align=args.align,
-                        line_spacing=args.line_spacing, rotate=args.rotate)
+                        line_spacing=args.line_spacing,
+                        rotate=_resolve_rotate(args, profile),
+                        printhead_px=profile.printhead_px)
+    return img, label_h
 
+
+async def cmd_text(args: argparse.Namespace) -> None:
+    text = _resolve_text(args)
+
+    # Rendering needs the printhead width, so when we are going to print we
+    # connect first and render for whatever printer answered.
     if args.preview:
+        profile = _offline_profile(args)
+        img, _ = _render_text(args, text, profile)
         img.save(args.preview)
-        print(f"Preview written to {args.preview} ({img.width}x{img.height}), not printing.")
+        print(f"Preview written to {args.preview} ({img.width}x{img.height}) "
+              f"for {profile.name}, not printing.")
         return
 
-    async with connect(args.address, classic=args.classic, channel=args.channel) as pc:
+    async with connect(args.address, classic=args.classic, channel=args.channel,
+                       profile=_forced_profile(args)) as pc:
+        _announce_profile(pc)
+        img, label_h = _render_text(args, text, pc.profile)
         shown = text.replace("\n", " / ")
         print(f'Printing "{shown}"...')
         ok = await do_print(pc, img, args.density, paper=args.paper,
                             copies=args.copies, dither=False, max_rows=label_h)
         print("Done." if ok else "FAILED.")
+
+
+def _announce_profile(pc: PrinterClient) -> None:
+    p = pc.profile
+    how = "detected" if pc.profile_detected else "assumed"
+    print(f"  Printer: {p.name} ({how}), {p.printhead_px}px / {p.printhead_mm:.0f}mm head")
+    if not pc.profile_detected:
+        print("  Pass --printer to pick a profile if this one is wrong "
+              f"({', '.join(profile_names())})")
 
 
 def cmd_fonts(args: argparse.Namespace) -> None:
@@ -170,13 +228,30 @@ def _font_dirs() -> list[str]:
 
 async def cmd_image(args: argparse.Namespace) -> None:
     img = Image.open(args.path)
-    label_h = _resolve_label_height(args)
-    async with connect(args.address, classic=args.classic, channel=args.channel) as pc:
+    async with connect(args.address, classic=args.classic, channel=args.channel,
+                       profile=_forced_profile(args)) as pc:
+        _announce_profile(pc)
+        label_h = _resolve_label_height(args, pc.profile)
         print(f"Printing {args.path}...")
         ok = await do_print(pc, img, args.density, paper=args.paper,
                             copies=args.copies, dither=not args.no_dither,
                             max_rows=label_h)
         print("Done." if ok else "FAILED.")
+
+
+def cmd_profiles(args: argparse.Namespace) -> None:
+    """List the printer profiles this package knows."""
+    for p in PROFILES:
+        feed = "form feed" if p.feed_dots is None else f"{p.feed_dots} dots"
+        print(f"  {p.name}")
+        print(f"      {p.description}")
+        print(f"      models        {', '.join(p.models)}")
+        print(f"      printhead     {p.printhead_px}px / {p.printhead_mm:.0f}mm")
+        print(f"      label         {p.default_label_mm}mm, default rotate {p.default_rotate}")
+        print(f"      feed          {feed}")
+        print(f"      paper type    {'yes' if p.supports_paper_type else 'not supported'}")
+        if p.aliases:
+            print(f"      aliases       {', '.join(p.aliases)}")
 
 
 async def cmd_set(args: argparse.Namespace) -> None:
@@ -245,6 +320,11 @@ def main() -> None:
                              "or set FICHERO_TRANSPORT=classic)")
     parser.add_argument("--channel", type=int, default=1,
                         help="RFCOMM channel (default: 1, only used with --classic)")
+    parser.add_argument("--printer", default=os.environ.get("FICHERO_PRINTER"),
+                        help="Force a printer profile instead of detecting it from the "
+                             f"model ({', '.join(profile_names())}), or set "
+                             "FICHERO_PRINTER. Also picks the profile that --preview "
+                             "renders for")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_info = sub.add_parser("info", help="Show device info")
@@ -265,11 +345,11 @@ def main() -> None:
                              "built-in font")
     p_text.add_argument("--line", action="append", metavar="TEXT",
                         help="Add another line of text; repeat for more lines")
-    p_text.add_argument("--rotate", type=int, choices=[0, 90, 180, 270],
-                        default=int(os.environ.get("FICHERO_ROTATE", "0")),
-                        help="How the text sits on the label: 0 reads along the "
-                             "label length (default), 90 reads across it with the "
-                             "lines stacked down the length (or set FICHERO_ROTATE)")
+    p_text.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], default=None,
+                        help="How the text sits on the label: 0 reads along the feed "
+                             "direction, 90 reads across it with the lines stacked "
+                             "down the label. Default: whatever the printer profile "
+                             "says reads naturally (or set FICHERO_ROTATE)")
     p_text.add_argument("--align", choices=["left", "center", "right"], default="center",
                         help="Horizontal alignment of multi-line text (default: center)")
     p_text.add_argument("--line-spacing", type=int, default=4,
@@ -277,9 +357,9 @@ def main() -> None:
     p_text.add_argument("--preview", metavar="PATH",
                         help="Save the rendered label to an image file instead of printing")
     p_text.add_argument("--label-length", type=int, default=None,
-                        help="Label length in mm (default: 30mm)")
-    p_text.add_argument("--label-height", type=int, default=240,
-                        help="Label height in pixels (default: 240, prefer --label-length)")
+                        help="Label length in mm. Default: the profile's own size")
+    p_text.add_argument("--label-height", type=int, default=None,
+                        help="Label length in pixels (prefer --label-length)")
     _add_paper_arg(p_text)
     p_text.set_defaults(func=cmd_text)
 
@@ -291,14 +371,17 @@ def main() -> None:
     p_image.add_argument("--no-dither", action="store_true",
                          help="Disable Floyd-Steinberg dithering (use simple threshold)")
     p_image.add_argument("--label-length", type=int, default=None,
-                         help="Label length in mm (default: 30mm)")
-    p_image.add_argument("--label-height", type=int, default=240,
-                         help="Max image height in pixels (default: 240, prefer --label-length)")
+                         help="Label length in mm. Default: the profile's own size")
+    p_image.add_argument("--label-height", type=int, default=None,
+                         help="Max image height in pixels (prefer --label-length)")
     _add_paper_arg(p_image)
     p_image.set_defaults(func=cmd_image)
 
     p_fonts = sub.add_parser("fonts", help="List installed fonts usable with --font")
     p_fonts.set_defaults(func=cmd_fonts, sync=True)
+
+    p_profiles = sub.add_parser("profiles", help="List known printer profiles")
+    p_profiles.set_defaults(func=cmd_profiles, sync=True)
 
     p_set = sub.add_parser("set", help="Change printer settings")
     p_set.add_argument("setting", choices=["density", "shutdown", "paper"],
