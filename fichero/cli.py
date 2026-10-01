@@ -360,8 +360,11 @@ def main() -> None:
     p_text.add_argument("--plain", action="store_true",
                         help="Print the text literally, without interpreting **bold**, "
                              "*italic*, __underline__, ~~strike~~ and # headings")
-    p_text.add_argument("--line", action="append", metavar="TEXT",
-                        help="Add another line of text; repeat for more lines")
+    # nargs="?" lets a bare --line mean an empty line. Windows PowerShell 5.1
+    # drops an empty "" argument, so --line "" reaches us without its value.
+    p_text.add_argument("--line", action="append", metavar="TEXT", nargs="?", const="",
+                        help="Add another line of text; repeat for more lines. "
+                             "Without TEXT it adds an empty line")
     p_text.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], default=None,
                         help="How the text sits on the label: 0 reads along the feed "
                              "direction, 90 reads across it with the lines stacked "

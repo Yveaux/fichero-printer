@@ -280,8 +280,8 @@ fichero text --line "M8" --line "divers" --valign top
 ```
 
 Empty lines at the start or end of the text also count, so they push the text away
-from that end. In PowerShell write them as `--line " "`, because PowerShell drops an
-empty `""` argument altogether.
+from that end. `--line ""` adds one, and so does a bare `--line`, which is what
+Windows PowerShell 5.1 turns `--line ""` into.
 
 ### Formatting
 
