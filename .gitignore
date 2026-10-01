@@ -6,3 +6,4 @@ __pycache__/
 decompiled/
 debug_*.png
 logcat_*.txt
+preview.png
