@@ -7,7 +7,7 @@ import sys
 
 from PIL import Image
 
-from fichero.imaging import image_to_raster, prepare_image, text_to_image
+from fichero.imaging import FontFamily, image_to_raster, prepare_image, text_to_image
 from fichero.printer import (
     DELAY_AFTER_DENSITY,
     DELAY_AFTER_FEED,
@@ -161,11 +161,14 @@ def _resolve_text(args: argparse.Namespace) -> str:
 def _render_text(args: argparse.Namespace, text: str, profile: PrinterProfile):
     """Render *text* for *profile*, returning the image and its row count."""
     label_h = _resolve_label_height(args, profile)
+    family = FontFamily(args.font, bold=args.font_bold, italic=args.font_italic,
+                        bold_italic=args.font_bold_italic)
     img = text_to_image(text, font_size=args.font_size, label_height=label_h,
-                        font=args.font, align=args.align,
+                        font=family, align=args.align,
                         line_spacing=args.line_spacing,
                         rotate=_resolve_rotate(args, profile),
-                        printhead_px=profile.printhead_px)
+                        printhead_px=profile.printhead_px,
+                        use_markup=not args.plain)
     return img, label_h
 
 
@@ -346,6 +349,17 @@ def main() -> None:
                         help="TrueType font: file path or installed name such as "
                              "'arialbd' (or set FICHERO_FONT). Default: Pillow's "
                              "built-in font")
+    p_text.add_argument("--font-bold", metavar="FONT",
+                        help="Font for **bold** text. Default: the --font family's own "
+                             "bold face if one is installed, else a thickened regular")
+    p_text.add_argument("--font-italic", metavar="FONT",
+                        help="Font for *italic* text. Default: the --font family's own "
+                             "italic face if one is installed, else a slanted regular")
+    p_text.add_argument("--font-bold-italic", metavar="FONT",
+                        help="Font for ***bold italic*** text, found or faked the same way")
+    p_text.add_argument("--plain", action="store_true",
+                        help="Print the text literally, without interpreting **bold**, "
+                             "*italic*, __underline__, ~~strike~~ and # headings")
     p_text.add_argument("--line", action="append", metavar="TEXT",
                         help="Add another line of text; repeat for more lines")
     p_text.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], default=None,

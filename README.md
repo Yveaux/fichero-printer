@@ -274,6 +274,33 @@ fichero text "Line one\nLine two"
 the layout within the text block. The block itself is always centred on the label, in
 both directions.
 
+### Formatting
+
+Text takes Markdown-style formatting:
+
+| Write | Get |
+|---|---|
+| `**bold**` | bold |
+| `*italic*` or `_italic_` | italic |
+| `__underline__` | underlined |
+| `~~strike~~` | struck through |
+| `# Heading`, `## Heading`, `### Heading` | a bold line at 1.6x, 1.3x or 1.15x the font size |
+
+```
+fichero text --line "# Kabel A12" --line "**230V** / *16A*" --font arial --preview label.png
+```
+
+Markers combine (`***bold italic***`, `**__bold and underlined__**`). Ordinary text
+rarely trips over them: a marker that is never closed prints as-is, `3 * 4` stays
+literal, and so does the `_` in `file_name`. A backslash makes the next character
+literal (`\*`, `\_`, `\#`), and `--plain` switches formatting off altogether.
+
+Bold and italic use the font's own bold and italic faces when they are installed next
+to it, found by name: `arial` brings `arialbd`, `ariali` and `arialbi`, `DejaVuSans`
+brings `DejaVuSans-Bold` and so on. A font without them, such as Pillow's built-in
+one or `bahnschrift`, gets a thickened or slanted version of its regular face instead.
+`--font-bold`, `--font-italic` and `--font-bold-italic` pick the faces explicitly.
+
 ### Orientation
 
 `--rotate` sets how the text sits on the label when you hold it the long way round, the
