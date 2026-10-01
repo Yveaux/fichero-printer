@@ -168,7 +168,7 @@ def _render_text(args: argparse.Namespace, text: str, profile: PrinterProfile):
                         line_spacing=args.line_spacing,
                         rotate=_resolve_rotate(args, profile),
                         printhead_px=profile.printhead_px,
-                        use_markup=not args.plain)
+                        use_markup=not args.plain, valign=args.valign)
     return img, label_h
 
 
@@ -369,6 +369,9 @@ def main() -> None:
                              "says reads naturally (or set FICHERO_ROTATE)")
     p_text.add_argument("--align", choices=["left", "center", "right"], default="center",
                         help="Horizontal alignment of multi-line text (default: center)")
+    p_text.add_argument("--valign", choices=["top", "center", "bottom"], default="center",
+                        help="Where the text block sits on the label, as you read it "
+                             "(default: center)")
     p_text.add_argument("--line-spacing", type=int, default=4,
                         help="Extra pixels between lines (default: 4)")
     p_text.add_argument("--preview", metavar="PATH",

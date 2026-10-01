@@ -218,8 +218,11 @@ def _draw_span(canvas: Image.Image, x: float, baseline: int, text: str, font,
 
 
 def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
-                   align: str, line_spacing: int) -> Image.Image:
-    """Lay out styled lines on a generous white canvas, black ink."""
+                   align: str, line_spacing: int) -> tuple[Image.Image, list[tuple[int, int]]]:
+    """Lay out styled lines on a generous white canvas, black ink.
+
+    Also returns each line's (top, bottom) on that canvas.
+    """
     laid_out = []  # (line, size, ascent, descent, width, pieces)
     for line in lines:
         size = max(1, round(font_size * line.scale))
@@ -242,6 +245,7 @@ def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
     img = Image.new("L", (int(block_w) + 2 * margin, int(block_h) + 2 * margin), 255)
     draw = ImageDraw.Draw(img)
     y = margin
+    boxes = []
     for size, ascent, descent, width, pieces in laid_out:
         if align == "left":
             x0 = margin
@@ -261,8 +265,9 @@ def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
             if span.style.strike and span.text.strip():
                 top = baseline - round(size * 0.3) - thickness // 2
                 draw.rectangle((left, top, right, top + thickness - 1), fill=0)
+        boxes.append((y, y + ascent + descent))
         y += ascent + descent + line_spacing
-    return img
+    return img, boxes
 
 
 def text_to_image(
@@ -275,8 +280,10 @@ def text_to_image(
     rotate: int = 0,
     printhead_px: int = DEFAULT_PROFILE.printhead_px,
     use_markup: bool = True,
+    valign: str = "center",
 ) -> Image.Image:
-    """Render crisp 1-bit text, centred on the label.
+    """Render crisp 1-bit text on the label, centred unless *valign* says
+    "top" or "bottom".
 
     *text* may contain newlines for multi-line labels, and Markdown-style
     formatting (see fichero.markup) unless *use_markup* is False. *font* is
@@ -302,6 +309,8 @@ def text_to_image(
     """
     if rotate not in (0, 90, 180, 270):
         raise ValueError(f"rotate must be 0, 90, 180 or 270, got {rotate}")
+    if valign not in ("top", "center", "bottom"):
+        raise ValueError(f"valign must be top, center or bottom, got {valign!r}")
 
     # Rotation applied to the canvas to get the printer's 96px-wide raster.
     # The web client turns the label canvas clockwise (ImageEncoder.rotateCW90
@@ -317,19 +326,27 @@ def text_to_image(
 
     family = font if isinstance(font, FontFamily) else FontFamily(font)
     lines = markup.parse(text) if use_markup else markup.plain(text)
-    block = _render_markup(lines, family, font_size, align, line_spacing)
+    block, boxes = _render_markup(lines, family, font_size, align, line_spacing)
 
     # Centre on the ink bounding box, so the block sits optically centred
-    # whether or not the text has ascenders or descenders.
+    # whether or not the text has ascenders or descenders. Blank lines at the
+    # start or end have no ink but still count, so they can push text aside.
     bbox = ImageOps.invert(block).getbbox()
     if bbox:
-        block = block.crop(bbox)
+        left, top, right, bottom = bbox
+        blank = [not line.text.strip() for line in lines]
+        if blank[0]:
+            top = min(top, boxes[0][0])
+        if blank[-1]:
+            bottom = max(bottom, boxes[-1][1])
+        block = block.crop((left, top, right, bottom))
         tw, th = block.size
         if tw > canvas_w or th > canvas_h:
             log.warning("Text block is %dx%dpx, label area is %dx%dpx - it will be cut off "
                         "(reduce --font-size, or raise --label-length)",
                         tw, th, canvas_w, canvas_h)
-        _paste_ink(img, block, ((canvas_w - tw) // 2, (canvas_h - th) // 2))
+        y = {"top": 0, "center": (canvas_h - th) // 2, "bottom": canvas_h - th}[valign]
+        _paste_ink(img, block, ((canvas_w - tw) // 2, y))
 
     if img_rotation:
         img = img.rotate(img_rotation, expand=True)

@@ -1,5 +1,7 @@
 """Tests for Markdown-style text formatting."""
 
+import numpy as np
+
 from fichero.imaging import text_to_image
 from fichero.markup import HEADING_SCALE, Style, parse
 
@@ -80,3 +82,24 @@ def test_formatting_changes_ink():
     assert ink(bold) > ink(plain)
     assert ink(literal) > ink(plain)
     assert bold.tobytes() != literal.tobytes()
+
+
+def test_blank_lines_push_text():
+    kw = dict(rotate=90, printhead_px=384, label_height=200)
+    ink_rows = lambda im: np.nonzero((np.array(im) == 0).any(axis=1))[0].tolist()
+    centred = ink_rows(text_to_image("M8", **kw))
+    pushed_up = ink_rows(text_to_image("M8\n\n\n", **kw))
+    pushed_down = ink_rows(text_to_image("\n\n\nM8", **kw))
+    assert pushed_up[0] < centred[0] < pushed_down[0]
+
+
+def test_valign():
+    kw = dict(printhead_px=384, label_height=200)
+    for rotate in (0, 90, 180, 270):
+        ink_rows = lambda im: np.nonzero((np.array(im.rotate(-((rotate + 270) % 360),
+                                          expand=True)) == 0).any(axis=1))[0]
+        top = ink_rows(text_to_image("M8", valign="top", rotate=rotate, **kw))
+        mid = ink_rows(text_to_image("M8", rotate=rotate, **kw))
+        bottom = ink_rows(text_to_image("M8", valign="bottom", rotate=rotate, **kw))
+        assert top[0] == 0
+        assert top[0] < mid[0] < bottom[0]

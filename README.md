@@ -271,8 +271,17 @@ fichero text "Line one\nLine two"
 ```
 
 `--align left|center|right` (default center) and `--line-spacing` (default 4px) control
-the layout within the text block. The block itself is always centred on the label, in
-both directions.
+the layout within the text block. The block itself is centred on the label; `--valign
+top|bottom` moves it to the top or bottom edge as you read the label, whatever
+`--rotate` says:
+
+```
+fichero text --line "M8" --line "divers" --valign top
+```
+
+Empty lines at the start or end of the text also count, so they push the text away
+from that end. In PowerShell write them as `--line " "`, because PowerShell drops an
+empty `""` argument altogether.
 
 ### Formatting
 
