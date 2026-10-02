@@ -7,11 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fichero.printer import (
+    CONNECT_ATTEMPTS,
+    CONNECT_TIMEOUT,
     RFCOMM_CHANNEL,
     PrinterClient,
     PrinterError,
     RFCOMMClient,
     connect,
+    connect_ble,
 )
 
 
@@ -207,14 +210,38 @@ class TestConnectClassic:
     async def test_ble_path_unchanged(self):
         """classic=False still uses BleakClient."""
         mock_bleak = AsyncMock()
-        mock_bleak.__aenter__ = AsyncMock(return_value=mock_bleak)
-        mock_bleak.__aexit__ = AsyncMock(return_value=None)
         mock_bleak.start_notify = AsyncMock()
+        device = MagicMock(address="AA:BB:CC:DD:EE:FF")
 
-        with patch("fichero.printer.BleakClient", return_value=mock_bleak) as mock_cls:
+        with patch("fichero.printer.BleakClient", return_value=mock_bleak) as mock_cls,              patch("fichero.printer.BleakScanner.find_device_by_address",
+                   AsyncMock(return_value=device)):
             async with connect("AA:BB:CC:DD:EE:FF", classic=False) as pc:
                 assert isinstance(pc, PrinterClient)
-            mock_cls.assert_called_once_with("AA:BB:CC:DD:EE:FF")
+            mock_cls.assert_called_once_with(device, timeout=CONNECT_TIMEOUT)
+            mock_bleak.connect.assert_awaited_once()
+            mock_bleak.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ble_retries_stalled_connect(self):
+        stalled = AsyncMock()
+        stalled.connect = AsyncMock(side_effect=asyncio.TimeoutError)
+        good = AsyncMock()
+        device = MagicMock(address="AA:BB:CC:DD:EE:FF")
+
+        with patch("fichero.printer.BleakClient", side_effect=[stalled, good]),              patch("fichero.printer.asyncio.sleep", AsyncMock()):
+            assert await connect_ble(device) is good
+        stalled.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ble_gives_up_after_attempts(self):
+        stalled = AsyncMock()
+        stalled.connect = AsyncMock(side_effect=asyncio.TimeoutError)
+        device = MagicMock(address="AA:BB:CC:DD:EE:FF")
+
+        with patch("fichero.printer.BleakClient", return_value=stalled) as mock_cls,              patch("fichero.printer.asyncio.sleep", AsyncMock()):
+            with pytest.raises(PrinterError, match=f"after {CONNECT_ATTEMPTS} attempts"):
+                await connect_ble(device)
+        assert mock_cls.call_count == CONNECT_ATTEMPTS
 
 
 # --- CLI arg parsing tests ---

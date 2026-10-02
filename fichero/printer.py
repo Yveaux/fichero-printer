@@ -12,6 +12,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from bleak import BleakClient, BleakGATTCharacteristic, BleakScanner
+from bleak.exc import BleakError
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
@@ -39,6 +40,13 @@ PRINTER_NAME_PREFIXES = all_name_prefixes()  # every profile's advertised names
 # returns the moment a printer answers, so a long window only costs anything
 # when there is nothing to find. A freshly powered-on D11s took 7.7s once.
 SCAN_TIMEOUT = 20
+# Seconds to wait for a BLE connection, service discovery included. Windows
+# now and then stalls in service discovery and never recovers, while a good
+# connection is up in about three seconds, so give up early and try again.
+# Measured on a D11s: one connect in four or five stalls, whatever the
+# service cache mode or the pause since the last session.
+CONNECT_TIMEOUT = 6
+CONNECT_ATTEMPTS = 4
 
 # Using the 18f0 service (any of the four BLE UART services work)
 WRITE_UUID = "00002af1-0000-1000-8000-00805f9b34fb"
@@ -93,8 +101,8 @@ class PrinterNotReady(PrinterError):
 # --- Discovery ---
 
 
-async def find_printer(profile: PrinterProfile | None = None) -> str:
-    """Scan BLE for a supported printer. Returns the address.
+async def find_printer(profile: PrinterProfile | None = None) -> BLEDevice:
+    """Scan BLE for a supported printer and return it.
 
     Looks for the Bluetooth names every profile advertises under, or only
     *profile*'s own when one is given - which is how you pick between two
@@ -121,7 +129,38 @@ async def find_printer(profile: PrinterProfile | None = None) -> str:
         )
 
     print(f"  Found {device.name} at {device.address}")
-    return device.address
+    return device
+
+
+async def find_printer_by_address(address: str) -> BLEDevice:
+    """Wait for the printer at *address* to advertise and return it."""
+    device = await BleakScanner.find_device_by_address(address, timeout=SCAN_TIMEOUT)
+    if device is None:
+        raise PrinterNotFound(f"Device with address {address} was not found. Is it turned on?")
+    return device
+
+
+async def connect_ble(device: BLEDevice) -> BleakClient:
+    """Connect to *device*, retrying when the connection stalls."""
+    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+        client = BleakClient(device, timeout=CONNECT_TIMEOUT)
+        try:
+            await client.connect()
+            return client
+        except (asyncio.TimeoutError, BleakError, OSError) as e:
+            reason = "timed out" if isinstance(e, asyncio.TimeoutError) else str(e)
+            if attempt == CONNECT_ATTEMPTS:
+                raise PrinterError(
+                    f"Could not connect to {device.address} ({reason}) after "
+                    f"{CONNECT_ATTEMPTS} attempts. Turn the printer off and on, and retry."
+                ) from e
+            print(f"  Connection {reason}, retrying ({attempt + 1}/{CONNECT_ATTEMPTS})...")
+            try:
+                await client.disconnect()
+            except (BleakError, OSError):
+                pass
+            await asyncio.sleep(1)
+    raise AssertionError("unreachable")
 
 
 # --- Status ---
@@ -468,10 +507,16 @@ async def connect(
                 await pc.detect_profile()
             yield pc
     else:
-        addr = address or await find_printer(profile)
-        async with BleakClient(addr) as client:
+        if address:
+            device = await find_printer_by_address(address)
+        else:
+            device = await find_printer(profile)
+        client = await connect_ble(device)
+        try:
             pc = PrinterClient(client, profile)
             await pc.start()
             if profile is None:
                 await pc.detect_profile()
             yield pc
+        finally:
+            await client.disconnect()

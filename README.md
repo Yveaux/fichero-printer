@@ -176,6 +176,11 @@ can take the better part of ten seconds to start advertising, and the first conn
 after that runs to about five seconds. Once it is awake, finding it takes well under
 a second.
 
+On Windows roughly one connection in four stalls after the printer is found, with
+Windows waiting forever on the printer's service list. The CLI gives such a
+connection six seconds, then drops it and tries again, up to four times; you see
+`Connection timed out, retrying` when that happens.
+
 ## Worked examples
 
 Both examples print a strip of screw sizes. They differ because the two printers
