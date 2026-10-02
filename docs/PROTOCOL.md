@@ -147,6 +147,37 @@ When printer returns FF nn, the second byte is a bitmask:
 | 10 0C | Form feed (alt, returns "OK") |
 
 
+## Label Alignment (D11s, unsolved)
+
+Measured with calipers on a ruler printed on a 14x30mm label (240-row raster,
+sent with the print sequence above):
+
+- The first raster row lands about 2.0mm (16 dots) into the label, and the last
+  2.2mm of the raster runs off the far end. The edge that prints first is the
+  one the top raster row is on.
+- Across the label the 12mm head sits off-centre: about 0.3mm from one edge,
+  1.8mm from the other.
+
+Attempts to start printing 16 dots earlier, none of which worked:
+
+| Tried | Result |
+|---|---|
+| `1F 11 11 10` between enable (4) and raster (5) | Blank label |
+| `1B 65 10` (ESC e) between enable and raster | Blank label |
+| `1B 65 10` before the print sequence (before step 2) | Correct once, then no effect on the next two labels; `1B 65 28` (40 dots) there was no different from none at all |
+| enable, `1B 65 10`, enable again, raster | Printed, but shifted 2mm as usual |
+
+The one correctly aligned label came from a byte-for-byte identical sequence
+to the two that were not, and straight after the blank label from the ESC e
+between enable and raster. So the start position seems to depend on what the
+previous job did, not just on the gap; that is unexplained. Any command sent
+between enable and the raster blanks the label.
+
+Not tried: replacing the `1D 0C` form feed with a fixed `1B 4A` feed so the next
+label parks earlier (the D1-4777 approach). It would not help the first label
+after power-on, and positions may drift from label to label without the gap sensor.
+
+
 ## Batch Printing
 
 For multiple copies, repeat steps 2-7 for each copy.
