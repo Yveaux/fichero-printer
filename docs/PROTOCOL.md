@@ -144,7 +144,7 @@ When printer returns FF nn, the second byte is a bitmask:
 |---|---|
 | 1D 0C | Form feed - advance to next label |
 | 1B 4A nn | Feed forward by nn dots |
-| 10 0C | Form feed (alt, returns "OK") |
+| 10 0C | Form feed (alt, returns "OK"). On firmware 2.4.9 it does nothing and returns nothing, inside a print job or after the stop command |
 
 
 ## Label Alignment (D11s, unsolved)
@@ -179,9 +179,11 @@ before printing. The 2mm offset means that retraction comes up about 2mm short.
 Watched over a number of prints, the retraction is the same distance every
 time and so is the offset, so it looks like a fixed firmware value rather than
 something that drifts. That is probably why a reverse feed beforehand changes
-nothing; the one good label remains unexplained. Worth trying: the alternative
-form feed `10 0C`, in case it parks the label differently, and looking for a
-firmware setting for the retraction that the Fichero app might send.
+nothing; the one good label remains unexplained. The alternative form feed
+`10 0C` was tried in place of `1D 0C`, to see whether it parks the label
+differently, but on firmware 2.4.9 it does not feed at all. Still worth
+looking for: a firmware setting for the retraction that the Fichero app might
+send.
 
 Not tried: replacing the `1D 0C` form feed with a fixed `1B 4A` feed so the next
 label parks earlier (the D1-4777 approach). It would not help the first label
