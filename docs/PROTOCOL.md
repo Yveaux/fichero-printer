@@ -173,6 +173,15 @@ between enable and raster. So the start position seems to depend on what the
 previous job did, not just on the gap; that is unexplained. Any command sent
 between enable and the raster blanks the label.
 
+The printer pulls the label back by itself before every print: the form feed
+parks the label at the tear edge, past the head, and the firmware retracts it
+before printing. The 2mm offset means that retraction comes up about 2mm short.
+That is probably why a reverse feed beforehand changes nothing, and the one good
+label may have followed from the blank job before it leaving the paper somewhere
+else. Worth trying: the alternative form feed `10 0C`, in case it parks the
+label differently, and checking whether the retraction is always the same
+distance, including on the first label after power-on.
+
 Not tried: replacing the `1D 0C` form feed with a fixed `1B 4A` feed so the next
 label parks earlier (the D1-4777 approach). It would not help the first label
 after power-on, and positions may drift from label to label without the gap sensor.
