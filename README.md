@@ -315,6 +315,33 @@ brings `DejaVuSans-Bold` and so on. A font without them, such as Pillow's built-
 one or `bahnschrift`, gets a thickened or slanted version of its regular face instead.
 `--font-bold`, `--font-italic` and `--font-bold-italic` pick the faces explicitly.
 
+### Icons
+
+`:name:` puts an icon in the text, from Google's
+[Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons), the same set
+the web designer offers:
+
+```
+fichero text --line "# :build: Tools" --line ":bolt: 230V / 16A :warning:"
+```
+
+Icons take the size of the line they are on, so a heading's icon is larger, and sit
+centred on its capitals. Bold and italic leave them as they are. There are about 2200;
+find one by part of its name, or render a sheet to see what they look like:
+
+```
+fichero icons water                     # water, water_damage, water_drop, ...
+fichero icons build --preview icons.png
+```
+
+A code only counts with no letter or digit right against either colon, so `12:30` and
+`a:b:c` stay text; `\:` makes a colon literal, and `--plain` turns icons off along with
+the rest of the formatting. An unknown name is an error that suggests close matches.
+
+The font is not shipped with the package. The first label with an icon downloads it,
+about 350KB, into `%LOCALAPPDATA%\fichero` on Windows, `~/Library/Caches/fichero` on
+macOS or `~/.cache/fichero` elsewhere; `FICHERO_CACHE` picks another directory.
+
 ### Orientation
 
 `--rotate` sets how the text sits on the label when you hold it the long way round, the
@@ -424,7 +451,7 @@ async with connect(profile=profile_by_name("d1-4777")) as pc:
 
 ## TODO
 
-- [ ] Emoji support in text labels. The default Pillow font has no emoji glyphs, so they render as squares. Needs two-pass rendering: split text into emoji/non-emoji segments, render emoji with Apple Color Emoji (macOS) or Noto Color Emoji (Linux) using `embedded_color=True`, then composite onto the label.
+- [x] Pictograms in text labels: `:name:` icons from Material Icons (see [Icons](#icons)). Colour emoji were left out on purpose: they dither badly on a 1-bit printer and their font differs per operating system.
 
 ## Protocol and reverse engineering
 

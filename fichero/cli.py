@@ -5,7 +5,9 @@ import asyncio
 import os
 import sys
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+
+from fichero import icons
 
 from fichero.imaging import FontFamily, image_to_raster, prepare_image, text_to_image
 from fichero.printer import (
@@ -244,6 +246,40 @@ async def cmd_image(args: argparse.Namespace) -> None:
         print("Done." if ok else "FAILED.")
 
 
+def cmd_icons(args: argparse.Namespace) -> None:
+    """List icon names usable as :name: in text, or render a sheet of them."""
+    names = icons.search(args.search)
+    if not names:
+        print(f"  No icon name contains {args.search!r}.")
+        return
+    if args.preview:
+        _icon_sheet(names).save(args.preview)
+        print(f"Sheet of {len(names)} icons written to {args.preview}")
+        return
+    width = max(len(n) for n in names) + 2
+    per_row = max(1, 100 // width)
+    for i in range(0, len(names), per_row):
+        print("  " + "".join(n.ljust(width) for n in names[i:i + per_row]).rstrip())
+    print()
+    print(f"  {len(names)} icons. Use one in text as :name:, e.g. :{names[0]}:")
+
+
+def _icon_sheet(names: list[str], cell_w: int = 150, cell_h: int = 70,
+                per_row: int = 8) -> Image.Image:
+    """A grid of icons with their names under them, for picking one out."""
+    per_row = min(per_row, len(names))
+    rows = -(-len(names) // per_row)
+    sheet = Image.new("L", (cell_w * per_row, cell_h * rows), 255)
+    draw = ImageDraw.Draw(sheet)
+    icon_font, label_font = icons.font(36), ImageFont.load_default(size=11)
+    for i, name in enumerate(names):
+        x = (i % per_row) * cell_w + cell_w // 2
+        y = (i // per_row) * cell_h
+        draw.text((x, y + 6), icons.char(name), font=icon_font, fill=0, anchor="mt")
+        draw.text((x, y + cell_h - 6), name, font=label_font, fill=0, anchor="mb")
+    return sheet
+
+
 def cmd_profiles(args: argparse.Namespace) -> None:
     """List the printer profiles this package knows."""
     for p in PROFILES:
@@ -402,6 +438,13 @@ def main() -> None:
 
     p_fonts = sub.add_parser("fonts", help="List installed fonts usable with --font")
     p_fonts.set_defaults(func=cmd_fonts, sync=True)
+
+    p_icons = sub.add_parser("icons", help="List icons usable as :name: in text")
+    p_icons.add_argument("search", nargs="?",
+                         help="Only names containing this, e.g. 'water'")
+    p_icons.add_argument("--preview", metavar="PATH",
+                         help="Render the icons with their names to an image file")
+    p_icons.set_defaults(func=cmd_icons, sync=True)
 
     p_profiles = sub.add_parser("profiles", help="List known printer profiles")
     p_profiles.set_defaults(func=cmd_profiles, sync=True)

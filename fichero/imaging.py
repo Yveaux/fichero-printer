@@ -6,7 +6,7 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from fichero import markup
+from fichero import icons, markup
 from fichero.profiles import DEFAULT_PROFILE
 
 log = logging.getLogger(__name__)
@@ -231,10 +231,16 @@ def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
         x = 0.0
         for span in line.spans:
             st = span.style
-            font, fake_bold, fake_italic = family.get(st.bold, st.italic, size)
-            bold_px = max(1, size // 12) if fake_bold else 0
-            advance = font.getlength(span.text) + bold_px
-            pieces.append((x, advance, span, font, bold_px, fake_italic))
+            if span.icon:
+                # Icons ignore bold and italic; underline and strike still apply.
+                font, glyphs = icons.font(size), icons.char(span.text)
+                bold_px, fake_italic, drop = 0, False, icons.baseline_offset(size)
+            else:
+                font, fake_bold, fake_italic = family.get(st.bold, st.italic, size)
+                glyphs, drop = span.text, 0
+                bold_px = max(1, size // 12) if fake_bold else 0
+            advance = font.getlength(glyphs) + bold_px
+            pieces.append((x, advance, span, glyphs, drop, font, bold_px, fake_italic))
             x += advance
         laid_out.append((size, ascent, descent, x, pieces))
 
@@ -255,8 +261,8 @@ def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
             x0 = margin + (block_w - width) / 2
         baseline = y + ascent
         thickness = max(1, size // 15)
-        for x, advance, span, font, bold_px, fake_italic in pieces:
-            _draw_span(img, x0 + x, baseline, span.text, font, bold_px, fake_italic,
+        for x, advance, span, glyphs, drop, font, bold_px, fake_italic in pieces:
+            _draw_span(img, x0 + x, baseline + drop, glyphs, font, bold_px, fake_italic,
                        ascent, descent)
             left, right = round(x0 + x), round(x0 + x + advance) - 1
             if span.style.underline and span.text.strip():

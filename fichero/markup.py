@@ -8,9 +8,12 @@ Supported, per line:
 - ``~~strikethrough~~``
 - ``# heading``, ``## heading``, ``### heading`` at the start of a line: a
   bold line in a larger size
+- ``:name:`` for a Material Icon, such as ``:bolt:`` (see fichero.icons)
 
 Markers nest and combine (``***bold italic***``, ``**__bold underline__**``).
 A backslash makes the next character literal (``\\*`` prints an asterisk).
+An icon code only counts with no letter or digit right against either colon,
+so times like ``12:30`` stay text.
 A marker that is never closed is printed as-is, and ``_`` inside a word
 (``file_name``) is left alone, so ordinary text rarely needs escaping.
 """
@@ -22,7 +25,8 @@ from dataclasses import dataclass, replace
 HEADING_SCALE = {1: 1.6, 2: 1.3, 3: 1.15}
 
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
-_ESCAPABLE = set("\\*_~#")
+_ESCAPABLE = set("\\*_~#:")
+_ICON_RE = re.compile(r":([a-z0-9_]+):")
 
 # Longest first, so "**" is not read as two "*".
 _MARKERS = ("**", "__", "~~", "*", "_")
@@ -42,6 +46,8 @@ class Style:
 class Span:
     text: str
     style: Style
+    icon: bool = False
+    """True when *text* is the name of an icon rather than text to print."""
 
 
 @dataclass
@@ -86,6 +92,14 @@ def _parse_inline(line: str, base: Style) -> list[Span]:
             buf.append(line[i + 1])
             i += 2
             continue
+        icon = _ICON_RE.match(line, i) if ch == ":" else None
+        if icon and _icon_bounded(line, icon.start(), icon.end()):
+            if buf:
+                tokens.append(("text", "".join(buf)))
+                buf = []
+            tokens.append(("icon", icon.group(1)))
+            i = icon.end()
+            continue
         marker = next((mk for mk in _MARKERS if line.startswith(mk, i)), None)
         if marker:
             before = line[i - 1] if i > 0 else " "
@@ -129,12 +143,22 @@ def _parse_inline(line: str, base: Style) -> list[Span]:
             if base.bold and attr == "bold":
                 style = replace(style, bold=True)
             continue
+        if tok[0] == "icon":
+            spans.append(Span(tok[1], style, icon=True))
+            continue
         text = tok[1]
-        if spans and spans[-1].style == style:
+        if spans and spans[-1].style == style and not spans[-1].icon:
             spans[-1].text += text
         else:
             spans.append(Span(text, style))
     return spans or [Span("", base)]
+
+
+def _icon_bounded(line: str, start: int, end: int) -> bool:
+    """Whether an icon code is clear of letters and digits on both sides."""
+    before = line[start - 1] if start > 0 else " "
+    after = line[end] if end < len(line) else " "
+    return not before.isalnum() and not after.isalnum()
 
 
 def _flanking(marker: str, before: str, after: str) -> tuple[bool, bool]:
