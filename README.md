@@ -102,8 +102,9 @@ Windows.
 
 ### Over USB (Windows)
 
-The most reliable way to print is to plug the D11s into the computer with a USB-C cable
-and switch it on. Windows binds its own USB printer driver to it, and the CLI talks to
+The most reliable way to print is to plug the printer into the computer with a USB cable
+and switch it on. Both the D11s (`09C5:0200`) and the D1-4777 (`09C7:0020`, which
+Windows lists as "APRT D1S") work this way. Windows binds its own USB printer driver to it, and the CLI talks to
 the printer through that: no scanning, no pairing, no connection that stalls.
 
 ```
@@ -117,6 +118,10 @@ insists on USB and fails if none is plugged in, `--no-usb` sticks to Bluetooth, 
 `=ble` sets either as the default. Only printers whose USB ids a profile lists are ever
 opened, so other printers on the same computer are left alone. USB is Windows-only for
 now.
+
+The D1-4777 does not answer the stop command over USB, so for a label that is not
+acknowledged within 5 seconds the CLI asks for the printer's status until it is done
+printing; expect a D1-4777 label to take about 6 seconds.
 
 ### Over Bluetooth
 

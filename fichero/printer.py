@@ -78,6 +78,9 @@ DELAY_CHUNK_GAP = 0.02       # inter-chunk pacing for BLE throughput
 DELAY_RASTER_SETTLE = 0.50   # wait for printhead after raster transfer
 DELAY_AFTER_FEED = 0.30      # wait after form feed before stop command
 DELAY_NOTIFY_EXTRA = 0.05    # extra wait for trailing BLE notification fragments
+STOP_ACK_TIMEOUT = 5.0       # wait this long for the stop command's 0xAA / "OK"
+STOP_DONE_TIMEOUT = 60.0     # then poll status this long for printing to end
+DELAY_STATUS_POLL = 0.5
 
 
 # --- Exceptions ---
@@ -162,6 +165,11 @@ async def connect_ble(device: BLEDevice) -> BleakClient:
                 pass
             await asyncio.sleep(1)
     raise AssertionError("unreachable")
+
+
+def _is_stop_ack(reply: bytes) -> bool:
+    """Whether *reply* is the printer's answer to the stop command."""
+    return bool(reply) and (reply[0] == 0xAA or reply.startswith(b"OK"))
 
 
 # --- Status ---
@@ -467,10 +475,31 @@ class PrinterClient:
             await self.feed_dots(self.profile.feed_dots)
 
     async def stop_print(self) -> bool:
-        """End the print job. Waits for 0xAA or 'OK'."""
-        r = await self.send(self.profile.stop_cmd, wait=True, timeout=60.0)
-        if r:
-            return r[0] == 0xAA or r.startswith(b"OK")
+        """End the print job and wait for the printer to finish.
+
+        Most printers answer the stop command with 0xAA or "OK" once the label
+        is done. The D1-4777 over USB never does, so when no answer comes the
+        printer's status is polled until it no longer reports printing. An
+        answer that turns up late, during that polling, counts as well.
+        """
+        try:
+            r = await self.send(self.profile.stop_cmd, wait=True, timeout=STOP_ACK_TIMEOUT)
+            return _is_stop_ack(r)
+        except PrinterTimeout:
+            pass
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + STOP_DONE_TIMEOUT
+        while loop.time() < deadline:
+            try:
+                r = await self.send(bytes([0x10, 0xFF, 0x40]), wait=True)
+            except PrinterTimeout:
+                r = b""
+            if _is_stop_ack(r):
+                return True
+            if r and not PrinterStatus(r[-1]).printing:
+                return True
+            await asyncio.sleep(DELAY_STATUS_POLL)
         return False
 
     async def get_info(self) -> dict:

@@ -117,6 +117,8 @@ D1_4777 = PrinterProfile(
     name="d1-4777",
     models=("D1-4777",),
     ble_name_prefixes=("CRAFTS&CO", "D1-4777"),
+    # Shows up as "APRT  D1S", a different vendor id from the D11s.
+    usb_ids=((0x09C7, 0x0020),),
     description="Crafts&Co 4777, 50x15mm labels",
     printhead_px=384,
     enable_cmd=LUJIANG_ENABLE,
