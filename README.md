@@ -120,8 +120,8 @@ opened, so other printers on the same computer are left alone. USB is Windows-on
 now.
 
 The D1-4777 does not answer the stop command over USB, so for a label that is not
-acknowledged within 5 seconds the CLI asks for the printer's status until it is done
-printing; expect a D1-4777 label to take about 6 seconds.
+acknowledged within 3 seconds the CLI asks for the printer's status until it is done
+printing; expect a D1-4777 label to take about 4 seconds.
 
 ### Over Bluetooth
 

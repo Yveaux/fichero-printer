@@ -78,7 +78,7 @@ DELAY_CHUNK_GAP = 0.02       # inter-chunk pacing for BLE throughput
 DELAY_RASTER_SETTLE = 0.50   # wait for printhead after raster transfer
 DELAY_AFTER_FEED = 0.30      # wait after form feed before stop command
 DELAY_NOTIFY_EXTRA = 0.05    # extra wait for trailing BLE notification fragments
-STOP_ACK_TIMEOUT = 5.0       # wait this long for the stop command's 0xAA / "OK"
+STOP_ACK_TIMEOUT = 3.0       # D11s answers a 30mm label in 2.5s; the D1-4777 on USB never
 STOP_DONE_TIMEOUT = 60.0     # then poll status this long for printing to end
 DELAY_STATUS_POLL = 0.5
 
