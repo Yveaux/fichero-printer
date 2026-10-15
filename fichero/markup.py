@@ -54,20 +54,38 @@ class Span:
 class Line:
     spans: list[Span]
     scale: float = 1.0
+    tight: bool = False
+    """True when this line follows a SOFT_BREAK, and so sits closer to the
+    line before it than lines that follow a newline."""
 
     @property
     def text(self) -> str:
         return "".join(s.text for s in self.spans)
 
 
+# Breaks a line without ending the paragraph: the lines on either side keep
+# close together. Unicode's own LINE SEPARATOR, so it cannot clash with text.
+SOFT_BREAK = " "
+
+
 def parse(text: str) -> list[Line]:
     """Split *text* into lines of styled spans."""
-    return [_parse_line(line) for line in text.split("\n")]
+    return _split(text, _parse_line)
 
 
 def plain(text: str) -> list[Line]:
     """The same structure as parse(), with every character taken literally."""
-    return [Line([Span(line, Style())]) for line in text.split("\n")]
+    return _split(text, lambda line: Line([Span(line, Style())]))
+
+
+def _split(text: str, make_line) -> list[Line]:
+    lines = []
+    for paragraph in text.split("\n"):
+        for i, part in enumerate(paragraph.split(SOFT_BREAK)):
+            line = make_line(part)
+            line.tight = i > 0
+            lines.append(line)
+    return lines
 
 
 def _parse_line(line: str) -> Line:

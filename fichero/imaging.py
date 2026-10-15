@@ -218,8 +218,12 @@ def _draw_span(canvas: Image.Image, x: float, baseline: int, text: str, font,
 
 
 def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
-                   align: str, line_spacing: int) -> tuple[Image.Image, list[tuple[int, int]]]:
+                   align: str, line_spacing: int,
+                   inner_spacing: int = 0) -> tuple[Image.Image, list[tuple[int, int]]]:
     """Lay out styled lines on a generous white canvas, black ink.
+
+    Lines are *line_spacing* apart, or *inner_spacing* for a tight line, one
+    that continues the line before it after a soft break.
 
     Also returns each line's (top, bottom) on that canvas.
     """
@@ -245,14 +249,15 @@ def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
         laid_out.append((size, ascent, descent, x, pieces))
 
     block_w = max((w for _, _, _, w, _ in laid_out), default=0)
-    block_h = sum(a + d for _, a, d, _, _ in laid_out) + line_spacing * (len(laid_out) - 1)
+    gaps = [inner_spacing if line.tight else line_spacing for line in lines[1:]]
+    block_h = sum(a + d for _, a, d, _, _ in laid_out) + sum(gaps)
     margin = max(font_size, *(s for s, *_ in laid_out)) if laid_out else font_size
 
     img = Image.new("L", (int(block_w) + 2 * margin, int(block_h) + 2 * margin), 255)
     draw = ImageDraw.Draw(img)
     y = margin
     boxes = []
-    for size, ascent, descent, width, pieces in laid_out:
+    for i, (size, ascent, descent, width, pieces) in enumerate(laid_out):
         if align == "left":
             x0 = margin
         elif align == "right":
@@ -272,7 +277,7 @@ def _render_markup(lines: list[markup.Line], family: FontFamily, font_size: int,
                 top = baseline - round(size * 0.3) - thickness // 2
                 draw.rectangle((left, top, right, top + thickness - 1), fill=0)
         boxes.append((y, y + ascent + descent))
-        y += ascent + descent + line_spacing
+        y += ascent + descent + (gaps[i] if i < len(gaps) else 0)
     return img, boxes
 
 
@@ -287,6 +292,7 @@ def text_to_image(
     printhead_px: int = DEFAULT_PROFILE.printhead_px,
     use_markup: bool = True,
     valign: str = "center",
+    inner_spacing: int = 0,
 ) -> Image.Image:
     """Render crisp 1-bit text on the label, centred unless *valign* says
     "top" or "bottom".
@@ -295,6 +301,10 @@ def text_to_image(
     formatting (see fichero.markup) unless *use_markup* is False. *font* is
     a font name or path, or a FontFamily to also pick its bold and italic
     faces explicitly.
+
+    Lines are *line_spacing* pixels apart, except where a line was broken
+    with markup.SOFT_BREAK: those stay *inner_spacing* apart, so one entry
+    of several lines reads as a unit.
 
     *rotate* is how the text sits on the label when you hold it the long way
     round, like the web designer shows it:
@@ -332,7 +342,8 @@ def text_to_image(
 
     family = font if isinstance(font, FontFamily) else FontFamily(font)
     lines = markup.parse(text) if use_markup else markup.plain(text)
-    block, boxes = _render_markup(lines, family, font_size, align, line_spacing)
+    block, boxes = _render_markup(lines, family, font_size, align, line_spacing,
+                                  inner_spacing)
 
     # Centre on the ink bounding box, so the block sits optically centred
     # whether or not the text has ascenders or descenders. Blank lines at the

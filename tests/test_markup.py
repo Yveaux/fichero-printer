@@ -103,3 +103,36 @@ def test_valign():
         bottom = ink_rows(text_to_image("M8", valign="bottom", rotate=rotate, **kw))
         assert top[0] == 0
         assert top[0] < mid[0] < bottom[0]
+
+
+def test_soft_break_marks_tight_lines():
+    from fichero.markup import SOFT_BREAK
+
+    lines = parse(f"a{SOFT_BREAK}b\nc")
+    assert [(line.text, line.tight) for line in lines] == [("a", False), ("b", True), ("c", False)]
+
+
+def test_inner_spacing_keeps_soft_broken_lines_close():
+    from fichero.markup import SOFT_BREAK
+
+    kw = dict(rotate=90, printhead_px=384, label_height=240, line_spacing=20)
+
+    def ink_height(text, **extra):
+        rows = np.nonzero((np.array(text_to_image(text, **kw, **extra)) == 0).any(axis=1))[0]
+        return rows[-1] - rows[0]
+
+    hard = ink_height("Ag\nAg")
+    soft = ink_height(f"Ag{SOFT_BREAK}Ag")
+    assert hard - soft == 20
+    assert ink_height(f"Ag{SOFT_BREAK}Ag", inner_spacing=20) == hard
+
+
+def test_cli_line_backslash_n_is_a_soft_break():
+    import argparse
+
+    from fichero.cli import _resolve_text
+    from fichero.markup import SOFT_BREAK
+
+    # What the shell hands over: a backslash and an n, not a newline.
+    args = argparse.Namespace(text=[r"x\ny"], line=[r"a\nb", "c"])
+    assert _resolve_text(args) == f"x\ny\na{SOFT_BREAK}b\nc"

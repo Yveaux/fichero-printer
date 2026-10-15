@@ -8,8 +8,8 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 from fichero import icons
-
 from fichero.imaging import FontFamily, image_to_raster, prepare_image, text_to_image
+from fichero.markup import SOFT_BREAK
 from fichero.printer import (
     DELAY_AFTER_DENSITY,
     DELAY_AFTER_FEED,
@@ -149,12 +149,17 @@ def _resolve_text(args: argparse.Namespace) -> str:
     A literal backslash-n in the positional text is also treated as a line
     break, so shells that cannot produce a real newline can still make
     multi-line labels.
+
+    Inside a --line, a backslash-n (or a real newline) starts a line that
+    stays close to the one before it, --inner-spacing apart rather than
+    --line-spacing, so one entry of several lines reads as a unit.
     """
     lines = []
     if args.text:
         joined = " ".join(args.text).replace("\\n", "\n")
         lines.extend(joined.split("\n"))
-    lines.extend(args.line or [])
+    for line in args.line or []:
+        lines.append(line.replace("\\n", "\n").replace("\n", SOFT_BREAK))
     if not lines:
         raise SystemExit("  ERROR: give some text, either positionally or via --line")
     return "\n".join(lines)
@@ -170,7 +175,8 @@ def _render_text(args: argparse.Namespace, text: str, profile: PrinterProfile):
                         line_spacing=args.line_spacing,
                         rotate=_resolve_rotate(args, profile),
                         printhead_px=profile.printhead_px,
-                        use_markup=not args.plain, valign=args.valign)
+                        use_markup=not args.plain, valign=args.valign,
+                        inner_spacing=args.inner_spacing)
     return img, label_h
 
 
@@ -191,7 +197,7 @@ async def cmd_text(args: argparse.Namespace) -> None:
                        profile=_forced_profile(args)) as pc:
         _announce_profile(pc)
         img, label_h = _render_text(args, text, pc.profile)
-        shown = text.replace("\n", " / ")
+        shown = text.replace("\n", " / ").replace(SOFT_BREAK, " ")
         print(f'Printing "{shown}"...')
         ok = await do_print(pc, img, args.density, paper=args.paper,
                             copies=args.copies, dither=False, max_rows=label_h)
@@ -413,6 +419,9 @@ def main() -> None:
                              "(default: center)")
     p_text.add_argument("--line-spacing", type=int, default=4,
                         help="Extra pixels between lines (default: 4)")
+    p_text.add_argument("--inner-spacing", type=int, default=0,
+                        help="Extra pixels between the lines that a \\n splits one "
+                             "--line into (default: 0)")
     p_text.add_argument("--preview", metavar="PATH",
                         help="Save the rendered label to an image file instead of printing")
     p_text.add_argument("--label-length", type=int, default=None,

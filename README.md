@@ -275,6 +275,14 @@ awkward:
 fichero text "Line one\nLine two"
 ```
 
+A `\n` inside a `--line` also breaks it, but keeps its lines together: they are
+`--inner-spacing` apart (default 0px) instead of `--line-spacing`, so each `--line`
+reads as one entry:
+
+```
+fichero text --line "**M3 x 20**\nverzonken" --line "**M3 x 12**\ncilinderkop" --line-spacing 12
+```
+
 `--align left|center|right` (default center) and `--line-spacing` (default 4px) control
 the layout within the text block. The block itself is centred on the label; `--valign
 top|bottom` moves it to the top or bottom edge as you read the label, whatever
