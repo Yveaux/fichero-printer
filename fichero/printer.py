@@ -22,6 +22,7 @@ from fichero.profiles import (
     all_name_prefixes,
     profile_for_model,
 )
+from fichero.usb import USBClient, USBPrinter, find_usb_printers
 
 # --- RFCOMM (Classic Bluetooth) support - Linux + Windows (Python 3.9+) ---
 
@@ -491,13 +492,30 @@ async def connect(
     classic: bool = False,
     channel: int = RFCOMM_CHANNEL,
     profile: PrinterProfile | None = None,
+    usb: bool | None = None,
 ) -> AsyncGenerator[PrinterClient, None]:
     """Discover printer, connect, and yield a ready PrinterClient.
 
     The model is read back and the matching profile adopted, unless *profile*
     forces one - which is how you drive a printer this package does not know.
+
+    *usb* None uses a supported printer plugged in over USB when there is one,
+    unless Classic was asked for, and Bluetooth otherwise; *address* is only
+    for Bluetooth. True insists on USB, False never uses it.
     """
-    if classic:
+    usb_printer = None
+    if usb or (usb is None and not classic):
+        usb_printer = _pick_usb_printer(profile, required=bool(usb))
+
+    if usb_printer is not None:
+        print(f"Using {usb_printer}")
+        async with USBClient(usb_printer) as client:
+            pc = PrinterClient(client, profile)
+            await pc.start()
+            if profile is None:
+                await pc.detect_profile()
+            yield pc
+    elif classic:
         if not address:
             raise PrinterError("--address is required for Classic Bluetooth (no scanning)")
         async with RFCOMMClient(address, channel) as client:
@@ -520,3 +538,16 @@ async def connect(
             yield pc
         finally:
             await client.disconnect()
+
+
+def _pick_usb_printer(profile: PrinterProfile | None, required: bool) -> "USBPrinter | None":
+    """The USB printer to use: the first one, or the first of *profile*'s."""
+    printers = find_usb_printers()
+    if profile is not None:
+        printers = [p for p in printers if p.profile.name == profile.name]
+    if printers:
+        return printers[0]
+    if required:
+        wanted = f"{profile.name} " if profile else "supported "
+        raise PrinterNotFound(f"No {wanted}printer found on USB. Is it plugged in and switched on?")
+    return None

@@ -215,7 +215,7 @@ class TestConnectClassic:
 
         with patch("fichero.printer.BleakClient", return_value=mock_bleak) as mock_cls,              patch("fichero.printer.BleakScanner.find_device_by_address",
                    AsyncMock(return_value=device)):
-            async with connect("AA:BB:CC:DD:EE:FF", classic=False) as pc:
+            async with connect("AA:BB:CC:DD:EE:FF", classic=False, usb=False) as pc:
                 assert isinstance(pc, PrinterClient)
             mock_cls.assert_called_once_with(device, timeout=CONNECT_TIMEOUT)
             mock_bleak.connect.assert_awaited_once()

@@ -43,6 +43,10 @@ class PrinterProfile:
     for every profile's prefixes, so a new model is only discoverable once its
     own are listed here."""
 
+    usb_ids: tuple[tuple[int, int], ...] = ()
+    """(vendor, product) ids the model has on USB. Only printers listed here
+    are opened over USB, so no other printer is sent these commands."""
+
     description: str = ""
 
     printhead_px: int = 96
@@ -97,6 +101,7 @@ D11S = PrinterProfile(
     name="d11s",
     models=("D11s", "D12*"),
     ble_name_prefixes=("FICHERO", "D11s_"),
+    usb_ids=((0x09C5, 0x0200),),
     description="Fichero / AiYin D11s, 14x30mm labels",
     printhead_px=96,
     enable_cmd=AIYIN_ENABLE,

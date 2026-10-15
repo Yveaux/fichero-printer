@@ -37,6 +37,21 @@ def _forced_profile(args: argparse.Namespace) -> PrinterProfile | None:
     return profile_by_name(name) if name else None
 
 
+def _connect(args: argparse.Namespace):
+    """Connect the way the global options say: USB, Classic or BLE.
+
+    An --address on the command line asks for Bluetooth, so it rules out
+    picking USB by itself; FICHERO_ADDR does not, it only says which
+    Bluetooth printer to use when it comes to that.
+    """
+    usb = args.usb
+    if usb is None and args.address:
+        usb = False
+    address = args.address or os.environ.get("FICHERO_ADDR")
+    return connect(address, classic=args.classic, channel=args.channel,
+                   profile=_forced_profile(args), usb=usb)
+
+
 def _offline_profile(args: argparse.Namespace) -> PrinterProfile:
     """Profile to render against when not connecting, as for --preview."""
     return _forced_profile(args) or DEFAULT_PROFILE
@@ -120,8 +135,7 @@ async def do_print(
 
 
 async def cmd_info(args: argparse.Namespace) -> None:
-    async with connect(args.address, classic=args.classic, channel=args.channel,
-                       profile=_forced_profile(args)) as pc:
+    async with _connect(args) as pc:
         info = await pc.get_info()
         for k, v in info.items():
             print(f"  {k}: {v}")
@@ -133,8 +147,7 @@ async def cmd_info(args: argparse.Namespace) -> None:
 
 
 async def cmd_status(args: argparse.Namespace) -> None:
-    async with connect(args.address, classic=args.classic, channel=args.channel,
-                       profile=_forced_profile(args)) as pc:
+    async with _connect(args) as pc:
         status = await pc.get_status()
         print(f"  Status: {status}")
         print(f"  Raw: 0x{status.raw:02X} ({status.raw:08b})")
@@ -193,8 +206,7 @@ async def cmd_text(args: argparse.Namespace) -> None:
               f"for {profile.name}, not printing.")
         return
 
-    async with connect(args.address, classic=args.classic, channel=args.channel,
-                       profile=_forced_profile(args)) as pc:
+    async with _connect(args) as pc:
         _announce_profile(pc)
         img, label_h = _render_text(args, text, pc.profile)
         shown = text.replace("\n", " / ").replace(SOFT_BREAK, " ")
@@ -241,8 +253,7 @@ def _font_dirs() -> list[str]:
 
 async def cmd_image(args: argparse.Namespace) -> None:
     img = Image.open(args.path)
-    async with connect(args.address, classic=args.classic, channel=args.channel,
-                       profile=_forced_profile(args)) as pc:
+    async with _connect(args) as pc:
         _announce_profile(pc)
         label_h = _resolve_label_height(args, pc.profile)
         print(f"Printing {args.path}...")
@@ -302,8 +313,7 @@ def cmd_profiles(args: argparse.Namespace) -> None:
 
 
 async def cmd_set(args: argparse.Namespace) -> None:
-    async with connect(args.address, classic=args.classic, channel=args.channel,
-                       profile=_forced_profile(args)) as pc:
+    async with _connect(args) as pc:
         if args.setting == "density":
             val = int(args.value)
             if not 0 <= val <= 2:
@@ -360,12 +370,23 @@ def _parse_paper(value: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fichero D11s Label Printer")
-    parser.add_argument("--address", default=os.environ.get("FICHERO_ADDR"),
+    parser.add_argument("--address",
                         help="BLE address (skip scanning, or set FICHERO_ADDR)")
     parser.add_argument("--classic", action="store_true",
                         default=os.environ.get("FICHERO_TRANSPORT", "").lower() == "classic",
                         help="Use Classic Bluetooth (RFCOMM) instead of BLE (Linux only, "
                              "or set FICHERO_TRANSPORT=classic)")
+    transport = os.environ.get("FICHERO_TRANSPORT", "").lower()
+    usb = parser.add_mutually_exclusive_group()
+    usb.add_argument("--usb", dest="usb", action="store_const", const=True,
+                     help="Print over USB, and fail if no supported printer is plugged in "
+                          "(or set FICHERO_TRANSPORT=usb). Default: USB when a supported "
+                          "printer is plugged in and no --address or --classic is given, "
+                          "Bluetooth LE otherwise")
+    usb.add_argument("--no-usb", dest="usb", action="store_const", const=False,
+                     help="Never use USB, even when the printer is plugged in "
+                          "(or set FICHERO_TRANSPORT=ble)")
+    parser.set_defaults(usb={"usb": True, "ble": False}.get(transport))
     parser.add_argument("--channel", type=int, default=1,
                         help="RFCOMM channel (default: 1, only used with --classic)")
     parser.add_argument("--printer", default=os.environ.get("FICHERO_PRINTER"),

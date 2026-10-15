@@ -100,6 +100,26 @@ Windows.
 
 ## Setting up the printer
 
+### Over USB (Windows)
+
+The most reliable way to print is to plug the D11s into the computer with a USB-C cable
+and switch it on. Windows binds its own USB printer driver to it, and the CLI talks to
+the printer through that: no scanning, no pairing, no connection that stalls.
+
+```
+fichero info
+Using d11s on USB (09C5:0200)
+```
+
+Whenever a supported printer is plugged in, the CLI uses it over USB by itself. `--usb`
+insists on USB and fails if none is plugged in, `--no-usb` sticks to Bluetooth, and an
+`--address` on the command line also means Bluetooth. `FICHERO_TRANSPORT=usb` or
+`=ble` sets either as the default. Only printers whose USB ids a profile lists are ever
+opened, so other printers on the same computer are left alone. USB is Windows-only for
+now.
+
+### Over Bluetooth
+
 Turn the printer on and run:
 
 ```
